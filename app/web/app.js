@@ -481,10 +481,10 @@ function tabWiki(p) {
   const doSearch = async () => {
     const r = await api("/api/wiki/search", {query: $("wk-q").value});
     const res = r.data.results || [];
-    $("wk-res").innerHTML = res.length ? res.map(h =>
-      '<div class="mod"><div><div class="t">' + h.path + '</div><div class="d">' + h.snippet + '</div></div>' +
-      '<button data-p="' + h.path + '" class="x">выжимка</button></div>').join("") :
-      '<div class="sub">ничего не найдено</div>';
+    if (!res.length) { $("wk-res").innerHTML = '<div class="sub">ничего не найдено</div>'; return; }
+    $("wk-res").innerHTML = res.map(h =>
+      '<div class="wl"><div class="wl-t">' + h.path + '</div><div class="wl-s">' + h.snippet + '</div>' +
+      '<button data-p="' + h.path + '" class="x">сделать выжимку</button></div>').join("");
     $("wk-res").querySelectorAll(".x").forEach(b => b.onclick = () => {
       const title = prompt("Название выжимки:");
       if (!title) return;
@@ -525,8 +525,10 @@ async function tabAna(p) {
   if (r.data.error) { $("tabbody").innerHTML = '<div class="err">' + r.data.error + '</div>'; return; }
   const s = r.data;
   const max = Math.max(1, ...s.by_day.map(d => d[1]));
+  const days = s.by_day.length || 1;
+  const avg = (s.by_day.reduce((a, d) => a + d[1], 0) / days).toFixed(1);
   $("tabbody").innerHTML =
-    '<div class="sum">Заметок: <b>' + s.notes + '</b> · слов: <b>' + s.words + '</b> · изменено за 7 дней: <b>' + s.changed_last_7d + '</b></div>' +
+    '<div class="sum">Заметок: <b>' + s.notes + '</b> · слов: <b>' + s.words + '</b> · изменено за 7 дней: <b>' + s.changed_last_7d + '</b> · в среднем заметок в день: <b>' + avg + '</b></div>' +
     '<h2 style="margin-top:16px">Топ тегов</h2><div>' +
     (s.top_tags.map(t => '<span class="chip">' + t[0] + ' · ' + t[1] + '</span>').join("") || '<span class="sub">тегов нет</span>') + '</div>' +
     '<h2 style="margin-top:16px">Активность по дням</h2><div>' +
