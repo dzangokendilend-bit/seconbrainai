@@ -1,13 +1,73 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
+<!doctype html>
+<html lang="ru"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Моника</title>
-<link rel="stylesheet" href="/web/theme.css">
-</head>
-<body>
-<div id="root"></div>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="monica.css">
+</head><body class="minimal">
+
+<canvas id="dots"></canvas><div class="aurora"><span></span><span></span><span></span></div>
+
+<!-- ── вход (по мотивам login.html Сибериады) ── -->
+<div id="scr-login" class="login-hero hidden">
+  <div class="login-brand"><svg class="globe" viewBox="0 0 64 64" aria-hidden="true">
+    <defs><clipPath id="c"><circle cx="32" cy="32" r="27"/></clipPath></defs>
+    <circle cx="32" cy="32" r="27" class="g-fill"/>
+    <g clip-path="url(#c)" class="g-line">
+      <circle cx="32" cy="32" r="27"/>
+      <ellipse cx="32" cy="32" rx="10" ry="27"/><ellipse cx="32" cy="32" rx="19" ry="27"/>
+      <line x1="5" y1="32" x2="59" y2="32"/><line x1="9" y1="18" x2="55" y2="18"/>
+      <line x1="9" y1="46" x2="55" y2="46"/>
+    </g>
+    <g class="g-type"><text x="32" y="40" text-anchor="middle">М</text></g>
+  </svg></div>
+  <h1 class="login-t">Моника</h1>
+  <p class="login-s">личное ИИ-пространство</p>
+  <input id="l-user" class="l-input" type="text" placeholder="юзернейм" autocomplete="username">
+  <input id="l-pass" class="l-input" type="password" placeholder="пароль" autocomplete="current-password">
+  <div class="row" style="justify-content:center">
+    <button id="l-hint" class="mbtn">подсказка</button>
+    <button id="l-go" class="mbtn acc">Войти →</button>
+  </div>
+  <div class="err" id="l-err"></div>
+  <p class="login-forget" id="l-hintbox"></p>
+  <p class="login-forget">Впервые здесь? <a href="#" id="l-reg">Создать аккаунт</a></p>
+</div>
+
+<!-- ── онбординг (7 шагов) ── -->
+<div id="scr-wizard" class="hidden"><div class="mcard" id="wz"></div></div>
+
+<!-- ── приложение: каркас chat.html ── -->
+<div id="scr-app" class="cs-page hidden">
+<div class="cs">
+  <aside class="cs-side">
+    <nav class="cs-nav" id="cs-nav"></nav>
+    <div class="cs-history">
+      <div class="cs-history-t">сессия</div>
+      <div id="cs-prof" class="cs-hist-list"></div>
+      <button type="button" id="cs-logout" class="cs-act">Выйти</button>
+    </div>
+  </aside>
+
+  <main class="cs-main">
+    <header class="cs-head">
+      <h1 id="m-title">Моника</h1>
+      <div class="cs-date" id="m-sub"></div>
+    </header>
+    <div id="m-body" style="display:flex;flex-direction:column;flex:1;min-height:0"></div>
+  </main>
+
+  <div class="cs-left">
+    <button type="button" class="cs-term" id="cs-gear" title="Настройки">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M21 12h-2.5M5.5 12H3M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8M18.4 18.4l-1.8-1.8M7.4 7.4L5.6 5.6"/></svg>
+    </button>
+    <button type="button" class="cs-term" id="cs-refresh" title="Обновить">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/></svg>
+    </button>
+  </div>
+</div>
+</div>
+
 <script src="/web/app.js"></script>
-</body>
-</html>
+</body></html>

@@ -115,23 +115,28 @@ class Handler(BaseHTTPRequestHandler):
             self._serve_file("index.html", "text/html; charset=utf-8")
             return
         if path.startswith("/web/"):
-            name = os.path.basename(path)
-            ctype = "application/javascript" if name.endswith(".js") else "text/plain"
-            self._serve_file(name, ctype)
+            self._serve_file(path[len("/web/"):])
             return
         self.send_error(404)
 
-    def _serve_file(self, name, ctype=None):
+    def _serve_file(self, rel, ctype=None):
         # Браузеры блокируют CSS с не-CSS MIME — карта обязательна
         # (баг 27.08: theme.css уезжал как text/plain и тема не применялась).
         ext_map = {".css": "text/css; charset=utf-8",
                    ".js": "application/javascript",
                    ".html": "text/html; charset=utf-8",
                    ".png": "image/png", ".jpg": "image/jpeg",
-                   ".svg": "image/svg+xml", ".ico": "image/x-icon"}
-        ext = os.path.splitext(name)[1].lower()
+                   ".svg": "image/svg+xml", ".ico": "image/x-icon",
+                   ".woff2": "font/woff2", ".woff": "font/woff"}
+        ext = os.path.splitext(rel)[1].lower()
         ctype = ext_map.get(ext, ctype or "application/octet-stream")
-        fp = os.path.join(config.WEB_DIR, name)
+        # подпапки разрешены (fonts/…), выход за web-каталог — нет
+        full = os.path.realpath(os.path.join(config.WEB_DIR, rel))
+        wroot = os.path.realpath(config.WEB_DIR)
+        if not full.startswith(wroot + os.sep):
+            self.send_error(404)
+            return
+        fp = full
         if not os.path.exists(fp):
             self.send_error(404)
             return
