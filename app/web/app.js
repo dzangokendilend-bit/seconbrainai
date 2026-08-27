@@ -653,32 +653,72 @@ async function termTurn(text) {
   }
 }
 
-/* ── Википедия: поиск и выжимки в стиле статей Иванопедии ── */
+/* ── Википедия: личная вики + поиск и выжимки в стиле Иванопедии (Фаза 5-F) ── */
 function tabWiki(p) {
   $("m-body").innerHTML =
+    '<div class="wk-open">' +
+    '<div class="wk-top"><h2 class="wk-h">Личная вики</h2>' +
+    '<button type="button" class="cs-act" id="wk-regen">Обновить вики</button></div>' +
+    '<div id="wk-arts" class="wl-list"></div>' +
+    '<div id="wk-view" class="body hidden"></div>' +
     '<div class="wk-search"><input class="minput" id="wk-q" style="margin:0" placeholder="что ищем в своих заметках?">' +
     '<button class="cs-act primary" id="wk-go">Искать</button></div>' +
-    '<div id="wk-res" class="body"></div>';
+    '<div id="wk-res" class="body"></div></div>';
+  const drawArts = async () => {
+    const r = await api("/api/wiki/articles", {});
+    const arts = r.data.articles || [];
+    $("wk-regen").textContent = "Обновить вики" +
+      (r.data.queued ? " (" + r.data.queued + " в очереди)" : "");
+    $("wk-arts").innerHTML = arts.length ? arts.map(a =>
+      '<div class="wl"><a href="#" class="wl-t" data-p="' + esc(a.path) + '">' + esc(a.title) + "</a>" +
+      '<button class="cs-act" data-open="' + esc(a.path) + '">читать</button></div>').join("")
+      : '<div class="sub">Статей пока нет — новые заметки попадают в очередь, «Обновить вики» создаёт статьи.</div>';
+    $("wk-arts").querySelectorAll(".wl-t,.cs-act[data-open]").forEach(el =>
+      el.onclick = ev => { ev.preventDefault(); openArticle(el.dataset.open || el.dataset.p); });
+  };
+  const openArticle = async path => {
+    const r = await api("/api/wiki/articles", {path: path});
+    if (r.data.error) { $("wk-view").innerHTML = '<p style="color:var(--red)">' + esc(r.data.error) + "</p>"; return; }
+    $("wk-view").innerHTML =
+      '<button type="button" class="cs-act" id="wk-back">← к списку статей</button>' +
+      '<div class="firstHeading">' + esc((path.split("/").pop() || "").replace(/\.md$/, "")) + "</div>" +
+      md(r.data.content.replace(/^---[\s\S]*?---\n*/, ""));
+    $("wk-view").classList.remove("hidden");
+    $("wk-arts").classList.add("hidden");
+    $("wk-back").onclick = () => {
+      $("wk-view").classList.add("hidden");
+      $("wk-arts").classList.remove("hidden");
+    };
+  };
+  $("wk-regen").onclick = async () => {
+    $("wk-regen").disabled = true;
+    $("wk-regen").textContent = "генерирую…";
+    const r = await api("/api/wiki/regen", {});
+    $("wk-regen").disabled = false;
+    if (r.data.error) { $("wk-regen").textContent = "Обновить вики"; return; }
+    drawArts();
+  };
   const doSearch = async () => {
     const r = await api("/api/wiki/search", {query: $("wk-q").value});
     const res = r.data.results || [];
-    if (!res.length) { $("wk-res").innerHTML = '<p>По этому запросу заметок нет.</p>'; return; }
+    if (!res.length) { $("wk-res").innerHTML = "<p>По этому запросу заметок нет.</p>"; return; }
     $("wk-res").innerHTML = res.map(h =>
-      '<div class="wl"><div class="wl-t">' + esc(h.path) + '</div>' +
-      '<div class="wl-s">' + esc(h.snippet) + '</div>' +
+      '<div class="wl"><div class="wl-t">' + esc(h.path) + "</div>" +
+      '<div class="wl-s">' + esc(h.snippet) + "</div>" +
       '<button class="cs-act" data-p="' + esc(h.path) + '">сделать выжимку</button></div>').join("");
     $("wk-res").querySelectorAll(".cs-act").forEach(b => b.onclick = () => {
       const title = prompt("Название выжимки:");
       if (!title) return;
       api("/api/wiki/extract", {source_path: b.dataset.p, title: title}).then(r2 => {
         $("wk-res").insertAdjacentHTML("afterbegin",
-          r2.data.ok ? '<p>✅ Выжимка сохранена: <b>' + esc(r2.data.path) + '</b></p>' :
-          '<p style="color:var(--red)">' + esc(r2.data.error) + '</p>');
+          r2.data.ok ? "<p>✅ Выжимка сохранена: <b>" + esc(r2.data.path) + "</b></p>" :
+          '<p style="color:var(--red)">' + esc(r2.data.error) + "</p>");
       });
     });
   };
   $("wk-go").onclick = doSearch;
   $("wk-q").onkeydown = e => { if (e.key === "Enter") doSearch(); };
+  drawArts();
 }
 
 /* ── Telegram-бот: подключение токена и статус поллера ── */

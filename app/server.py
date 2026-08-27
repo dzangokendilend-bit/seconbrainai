@@ -443,6 +443,8 @@ class Handler(BaseHTTPRequestHandler):
             hp = os.path.join(auth.user_dir(uid), "history.jsonl")
             for rec in records:
                 hist.record(hp, rec)
+                if rec.get("op") == "create_note":
+                    mon_mods.enqueue(auth.user_dir(uid), rec["path"])
             self._json({"results": results})
             return
 
@@ -486,6 +488,8 @@ class Handler(BaseHTTPRequestHandler):
             hp = os.path.join(auth.user_dir(uid), "history.jsonl")
             rec = hist.record(hp, {"op": "edit_note" if prev is not None else "create_note",
                                    "path": rel, "prev": prev})
+            if prev is None:
+                mon_mods.enqueue(auth.user_dir(uid), rel)
             self._json({"ok": True, "path": rel, "record_id": rec["id"]})
             return
 
@@ -499,6 +503,48 @@ class Handler(BaseHTTPRequestHandler):
             hp = os.path.join(auth.user_dir(uid), "history.jsonl")
             ok, msg = hist.undo(vault, hp, body.get("id"))
             self._json({"ok": ok, "message": msg}, 200 if ok else 400)
+            return
+
+        # ── Фаза 5-F: личная вики ──
+        if path == "/api/wiki/articles":
+            vault = os.path.join(auth.user_dir(uid), "vault")
+            if body.get("path"):
+                try:
+                    full, _rel = term.safe_path(vault, body.get("path"))
+                except ValueError as e:
+                    self._json({"error": str(e)}, 400)
+                    return
+                if not os.path.exists(full) or os.path.isdir(full):
+                    self._json({"error": "статья не найдена"}, 404)
+                    return
+                with open(full, encoding="utf-8", errors="replace") as f:
+                    self._json({"ok": True, "content": f.read(200_000)})
+                return
+            self._json({"articles": mon_mods.articles(vault),
+                        "queued": len(mon_mods.queued(auth.user_dir(uid)))})
+            return
+
+        if path == "/api/wiki/regen":
+            p = auth.load_profile(uid)
+            if not p.get("modules", {}).get("wikipedia"):
+                self._json({"error": "модуль Википедия выключен"}, 403)
+                return
+            user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
+            if not user_keys.get("smart"):
+                self._json({"error": "генерации нужен ключ OpenRouter (smart) — добавь в настройках"}, 400)
+                return
+            vault = os.path.join(auth.user_dir(uid), "vault")
+            udir = auth.user_dir(uid)
+            notes = [body["note"]] if body.get("note") else mon_mods.queued(udir)[:2]
+            done, errs = [], []
+            for rel in notes:
+                try:
+                    art = mon_mods.generate_article(vault, rel, user_keys["smart"])
+                    mon_mods.dequeue(udir, rel)
+                    done.append(art)
+                except Exception as e:
+                    errs.append(str(rel) + ": " + str(e))
+            self._json({"ok": True, "generated": done, "errors": errs})
             return
 
         if path == "/api/wiki/search":

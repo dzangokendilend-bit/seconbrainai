@@ -107,6 +107,12 @@ const consoleErrors = [], badResponses = [];
     await page.click("#tv-chat");
   }
   await tab("wiki", "#wk-q", "поиск по заметкам");
+  /* Фаза 5-F: личная вики */
+  ok("вики: заголовок «Личная вики» и кнопка обновления",
+    (await page.$(".wk-h")) && (await page.$("#wk-regen")));
+  await new Promise(r => setTimeout(r, 500));
+  ok("вики: секция статей отрисована", await page.$("#wk-arts"));
+  ok("вики: анимация открытия (.wk-open)", await page.$("#m-body .wk-open"));
   await tab("tg", "#tg-body", "статус бота");
   await tab("ana", ".stat-grid", "сводка аналитики");
   await tab("set", ".set-tab.on", "вкладки настроек");
