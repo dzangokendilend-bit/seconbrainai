@@ -179,10 +179,10 @@ const STEPS = {
        <label>Подсказка к паролю (если забудешь)</label><input id="w-hint" type="text" value="` + W.hint + `">
        <div class="sum" style="margin-top:16px">
        Юзернейм: <b>` + W.username + `</b><br>
-       Откуда: <b>` + (W.source || "-") + "</b> · цель: <b>" + (W.purpose || "-") + "</b><br>
-       Язык: <b>" + W.language + "</b> · модель: <b>" + W.model + "</b> · нагрузка: <b>" + W.daily_load + "/10</b><br>
-       Модули: <b>" + Object.keys(W.modules).filter(k => W.modules[k]).join(", ") + "</b><br>
-       Ключи: <b>" + Object.keys(W.keys).filter(k => W.keys[k]).join(", ") + "</b>
+       Откуда: <b>` + (W.source || "-") + `</b> · цель: <b>` + (W.purpose || "-") + `</b><br>
+       Язык: <b>` + W.language + `</b> · модель: <b>` + W.model + `</b> · нагрузка: <b>` + W.daily_load + `/10</b><br>
+       Модули: <b>` + Object.keys(W.modules).filter(k => W.modules[k]).join(", ") + `</b><br>
+       Ключи: <b>` + Object.keys(W.keys).filter(k => W.keys[k]).join(", ") + `</b>
        </div>` + nav());
     $("w-hint").oninput = () => W.hint = $("w-hint").value;
     bindNav(async () => {
