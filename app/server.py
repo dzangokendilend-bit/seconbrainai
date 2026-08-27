@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import auth
 import config
+import history as hist
 import keys as keys_mod
 import onboarding
 import providers
@@ -438,7 +439,66 @@ class Handler(BaseHTTPRequestHandler):
             if not clean:
                 self._json({"error": "нет операций для выполнения"}, 400)
                 return
-            self._json({"results": term.execute(vault, clean)})
+            results, records = term.execute(vault, clean)
+            hp = os.path.join(auth.user_dir(uid), "history.jsonl")
+            for rec in records:
+                hist.record(hp, rec)
+            self._json({"results": results})
+            return
+
+        # ── Фаза 5-E: Терминал 2.0 — дерево/чтение/запись/история/undo ──
+        if path == "/api/vault/tree":
+            vault = os.path.join(auth.user_dir(uid), "vault")
+            self._json({"tree": term.vault_tree(vault)})
+            return
+
+        if path == "/api/vault/read":
+            vault = os.path.join(auth.user_dir(uid), "vault")
+            try:
+                full, rel = term.safe_path(vault, body.get("path"))
+            except ValueError as e:
+                self._json({"error": str(e)}, 400)
+                return
+            if not os.path.exists(full) or os.path.isdir(full):
+                self._json({"error": "файл не найден"}, 404)
+                return
+            with open(full, encoding="utf-8", errors="replace") as f:
+                content = f.read(200_000)
+            self._json({"ok": True, "path": rel, "content": content})
+            return
+
+        if path == "/api/vault/write":
+            vault = os.path.join(auth.user_dir(uid), "vault")
+            try:
+                full, rel = term.safe_path(vault, body.get("path"))
+            except ValueError as e:
+                self._json({"error": str(e)}, 400)
+                return
+            content = str(body.get("content") or "")[:100_000]
+            prev = None
+            if os.path.exists(full):
+                with open(full, encoding="utf-8", errors="replace") as f:
+                    prev = f.read()[:50_000]
+            else:
+                os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "w", encoding="utf-8", newline="\n") as f:
+                f.write(content)
+            hp = os.path.join(auth.user_dir(uid), "history.jsonl")
+            rec = hist.record(hp, {"op": "edit_note" if prev is not None else "create_note",
+                                   "path": rel, "prev": prev})
+            self._json({"ok": True, "path": rel, "record_id": rec["id"]})
+            return
+
+        if path == "/api/vault/history":
+            hp = os.path.join(auth.user_dir(uid), "history.jsonl")
+            self._json({"history": hist.recent(hp)})
+            return
+
+        if path == "/api/vault/undo":
+            vault = os.path.join(auth.user_dir(uid), "vault")
+            hp = os.path.join(auth.user_dir(uid), "history.jsonl")
+            ok, msg = hist.undo(vault, hp, body.get("id"))
+            self._json({"ok": ok, "message": msg}, 200 if ok else 400)
             return
 
         if path == "/api/wiki/search":

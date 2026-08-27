@@ -153,6 +153,33 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 .wglyph svg{width:20px;height:20px;color:var(--link)}
 .mhint{font-size:11.5px;color:var(--muted);margin:-8px 0 10px}
 
+/* ── виток E: Терминал 2.0 — три панели ── */
+.tgrid{display:grid;grid-template-columns:220px minmax(0,1fr) 260px;gap:12px;flex:1;min-height:0;width:100%}
+.tpane{border:1px solid var(--border);border-radius:var(--r-sm);background:rgba(255,255,255,.03);
+  padding:10px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.tpane .cs-menu-h{margin-bottom:8px}
+.ttree,.thist{overflow-y:auto;font-size:12px}
+.tfile{display:block;width:100%;text-align:left;padding:6px 9px;border:none;border-radius:8px;
+  background:none;color:var(--text);font-family:var(--ui);font-size:12px;cursor:pointer;word-break:break-all}
+.tfile:hover{background:rgba(255,255,255,.07)}
+.tfile.sel{background:rgba(143,180,255,.10);color:var(--acc)}
+.tmid-switch{display:flex;gap:6px;margin-bottom:8px}
+#tchat{display:flex;flex-direction:column;flex:1;min-height:0}
+.te-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
+.te-area{flex:1;min-height:200px;resize:none;background:rgba(0,0,0,.25);border:1px solid var(--border);
+  border-radius:var(--r-sm);color:var(--text);font-family:ui-monospace,Consolas,monospace;
+  font-size:13px;line-height:1.55;padding:12px;outline:none}
+.te-area:focus{border-color:rgba(255,255,255,.35)}
+.thist-row{padding:7px 4px;border-bottom:1px solid rgba(255,255,255,.06);
+  display:flex;flex-wrap:wrap;gap:5px;align-items:center;word-break:break-all}
+.thist-t{color:var(--muted);font-size:10.5px;flex:none;width:100%}
+.thist-op{color:var(--acc);font-size:11px;flex:none}
+.thist-row .cs-act{margin-left:auto;padding:3px 10px;font-size:11px}
+@media (max-width:1100px){
+  .tgrid{grid-template-columns:1fr}
+  .tpane-tree,.tpane-log{max-height:180px}
+}
+
 /* ── виток D: вкладки настроек ── */
 .set-tabs{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
 .set-tab{flex:none;padding:7px 18px;border-radius:var(--r-pill);border:1px solid var(--border);

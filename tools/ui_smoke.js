@@ -90,6 +90,22 @@ const consoleErrors = [], badResponses = [];
     ok("вкладка «" + name + "»: " + what, await page.$(sel));
   }
   await tab("term", "#tform", "форма терминала");
+  /* Фаза 5-E: Терминал 2.0 — три панели */
+  ok("терминал 2.0: сетка из трёх панелей", await page.$(".tgrid .tpane-tree") && await page.$(".tgrid .tpane-log"));
+  await new Promise(r => setTimeout(r, 500));
+  const treeFiles = await page.$$eval("#ttree .tfile", els => els.length).catch(() => 0);
+  ok("терминал 2.0: дерево vault загружено (файлов " + treeFiles + ")", treeFiles >= 1);
+  ok("терминал 2.0: лог изменений", await page.$("#thist"));
+  ok("терминал 2.0: переключатель Чат⇄Редактор", await page.$("#tv-chat") && await page.$("#tv-edit"));
+  if (treeFiles >= 1) {
+    await page.click("#ttree .tfile");
+    await new Promise(r => setTimeout(r, 500));
+    ok("терминал 2.0: файл открыт в редакторе",
+      await page.$eval("#teditor", el => !el.classList.contains("hidden")).catch(() => false));
+    ok("терминал 2.0: содержимое подгружено",
+      await page.$eval("#te-area", el => el.value.length > 0).catch(() => false));
+    await page.click("#tv-chat");
+  }
   await tab("wiki", "#wk-q", "поиск по заметкам");
   await tab("tg", "#tg-body", "статус бота");
   await tab("ana", ".stat-grid", "сводка аналитики");

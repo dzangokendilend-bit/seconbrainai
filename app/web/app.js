@@ -505,15 +505,33 @@ async function chatTurn(text) {
   }
 }
 
-/* ── терминал: тот же панельный стиль, GLM, подтверждение операций ── */
+/* ── терминал 2.0: дерево / чат⇄редактор / лог изменений (Фаза 5-E) ── */
+let TERM = {view: "chat", openFile: null};
+
 function tabTerm(p) {
   $("m-body").innerHTML =
+    '<div class="tgrid">' +
+    '<div class="tpane tpane-tree"><div class="cs-menu-h">vault</div><div id="ttree" class="ttree"></div></div>' +
+    '<div class="tpane tpane-mid">' +
+    '<div class="tmid-switch">' +
+    '<button type="button" class="set-tab' + (TERM.view === "chat" ? " on" : "") + '" id="tv-chat">Чат</button>' +
+    '<button type="button" class="set-tab' + (TERM.view === "edit" ? " on" : "") + '" id="tv-edit">Редактор</button></div>' +
+    '<div id="tchat"' + (TERM.view === "chat" ? "" : ' class="hidden"') + '>' +
     '<div id="tlog" class="cs-log"></div>' +
     '<div class="cs-bottom"><form id="tform"><div class="cs-inputbar">' +
     '<textarea id="t-input" rows="1" placeholder="например: создай заметку идеи/план.md"></textarea>' +
     '<button type="submit" class="cs-send" title="Отправить">' + SEND_SVG + "</button>" +
-    "</div></form></div>";
-  addTMsg("bot", "Терминал работает только с твоим vault. Изменения — после подтверждения. Ядро Моники и чужие данные недоступны.");
+    "</div></form></div></div>" +
+    '<div id="teditor"' + (TERM.view === "edit" ? "" : ' class="hidden"') + '>' +
+    '<div class="te-head"><span id="te-file" class="sub">' +
+    esc(TERM.openFile || "файл не выбран — кликни в дереве слева") + "</span>" +
+    '<button type="button" class="cs-act primary" id="te-save">Сохранить</button></div>' +
+    '<textarea id="te-area" class="te-area" spellcheck="false" placeholder="содержимое .md файла"></textarea></div>' +
+    "</div>" +
+    '<div class="tpane tpane-log"><div class="cs-menu-h">изменения</div><div id="thist" class="thist"></div></div>' +
+    "</div>";
+  if (!$("tlog").children.length)
+    addTMsg("bot", "Терминал работает только с твоим vault. Изменения — после подтверждения. Ядро Моники и чужие данные недоступны.");
   const form = $("tform"), input = $("t-input");
   const resize = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px"; };
   input.addEventListener("input", resize);
@@ -521,6 +539,78 @@ function tabTerm(p) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
   });
   form.onsubmit = e => { e.preventDefault(); const t = input.value.trim(); if (!t) return; input.value = ""; resize(); termTurn(t); };
+  /* переключатель Чат ⇄ Редактор — без перерисовки, состояние сохраняется */
+  const setView = v => {
+    TERM.view = v;
+    $("tv-chat").classList.toggle("on", v === "chat");
+    $("tv-edit").classList.toggle("on", v === "edit");
+    $("tchat").classList.toggle("hidden", v !== "chat");
+    $("teditor").classList.toggle("hidden", v !== "edit");
+    if (v === "edit" && TERM.openFile) loadEditor();
+  };
+  $("tv-chat").onclick = () => setView("chat");
+  $("tv-edit").onclick = () => setView("edit");
+  $("te-save").onclick = saveEditor;
+  drawTree();
+  drawHist();
+}
+
+async function drawTree() {
+  const box = $("ttree");
+  if (!box) return;
+  const r = await api("/api/vault/tree", {});
+  const tree = r.data.tree || [];
+  box.innerHTML = tree.length ? tree.map(f =>
+    '<button type="button" class="tfile' + (f === TERM.openFile ? " sel" : "") +
+    '" data-p="' + esc(f) + '">' + esc(f) + "</button>").join("")
+    : '<div class="sub">vault пуст</div>';
+  box.querySelectorAll(".tfile").forEach(b => b.onclick = () => {
+    TERM.openFile = b.dataset.p;
+    box.querySelectorAll(".tfile").forEach(x => x.classList.toggle("sel", x === b));
+    $("tv-chat").classList.remove("on");
+    $("tv-edit").classList.add("on");
+    $("tchat").classList.add("hidden");
+    $("teditor").classList.remove("hidden");
+    TERM.view = "edit";
+    loadEditor();
+  });
+}
+
+async function loadEditor() {
+  if (!TERM.openFile || !$("te-area")) return;
+  $("te-file").textContent = TERM.openFile;
+  const r = await api("/api/vault/read", {path: TERM.openFile});
+  if (r.data.error) { $("te-area").value = ""; $("te-file").textContent = "⚠️ " + r.data.error; return; }
+  $("te-area").value = r.data.content;
+}
+
+async function saveEditor() {
+  if (!TERM.openFile || !$("te-area")) return;
+  const r = await api("/api/vault/write", {path: TERM.openFile, content: $("te-area").value});
+  if (r.data.error) { $("te-file").textContent = "⚠️ " + r.data.error; return; }
+  $("te-file").textContent = "сохранено: " + r.data.path;
+  drawTree();
+  drawHist();
+}
+
+async function drawHist() {
+  const box = $("thist");
+  if (!box) return;
+  const r = await api("/api/vault/history", {});
+  const items = r.data.history || [];
+  const mut = {create_note: 1, edit_note: 1, rename: 1, move: 1};
+  box.innerHTML = items.length ? items.map(h =>
+    '<div class="thist-row"><span class="thist-t">' + esc(h.ts || "") + '</span>' +
+    '<span class="thist-op">' + esc(h.op) + "</span> " + esc(h.path || "") +
+    (h.to ? " → " + esc(h.to) : "") +
+    (mut[h.op] ? '<button type="button" class="cs-act" data-id="' + h.id + '">откатить</button>' : "") +
+    "</div>").join("") : '<div class="sub">изменений пока нет</div>';
+  box.querySelectorAll(".cs-act[data-id]").forEach(b => b.onclick = async () => {
+    const r2 = await api("/api/vault/undo", {id: b.dataset.id});
+    addTMsg("bot", r2.data.message || ("⚠️ " + (r2.data.error || "ошибка отката")));
+    drawTree();
+    drawHist();
+  });
 }
 
 function addTMsg(role, text) {
@@ -554,6 +644,8 @@ async function termTurn(text) {
       const r2 = await api("/api/terminal/execute", {ops: ops});
       addTMsg("bot", r2.data.results ? r2.data.results.join("\n") : ("⚠️ " + r2.data.error));
       box.remove();
+      drawTree();
+      drawHist();
     };
   } catch (e) {
     tp.stop();

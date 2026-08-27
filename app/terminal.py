@@ -7,7 +7,7 @@ import os
 
 import config
 
-ALLOWED_OPS = {"create_note", "rename", "move", "read", "list"}
+ALLOWED_OPS = {"create_note", "edit_note", "rename", "move", "read", "list"}
 
 SYSTEM = """Ты — ИИ терминала веб-сервиса Моника. Помогаешь пользователю работать с ЕГО личным vault заметок.
 
@@ -24,6 +24,7 @@ SYSTEM = """Ты — ИИ терминала веб-сервиса Моника.
 {"reply": "текст пользователю", "ops": []}
 Доступные операции (пути ОТНОСИТЕЛЬНЫЕ от корня vault):
 - {"op": "create_note", "path": "папка/имя.md", "content": "текст заметки"}
+- {"op": "edit_note", "path": "существующий/файл.md", "content": "новый текст целиком"}
 - {"op": "rename", "path": "старое/имя.md", "to": "новое_имя.md"}
 - {"op": "move", "path": "путь/файл.md", "to": "другая/папка"}
 - {"op": "read", "path": "файл.md"}
@@ -84,9 +85,9 @@ def validate_ops(vault, ops):
             errs.append("операция запрещена: " + str(name))
             continue
         try:
-            if name == "create_note":
+            if name in ("create_note", "edit_note"):
                 _, rel = safe_path(vault, op.get("path"))
-                clean.append({"op": "create_note", "path": rel,
+                clean.append({"op": name, "path": rel,
                               "content": str(op.get("content") or "")[:50000]})
             elif name in ("rename", "move"):
                 _, rel = safe_path(vault, op.get("path"))
@@ -101,16 +102,33 @@ def validate_ops(vault, ops):
 
 
 def execute(vault, ops):
-    res = []
+    """Фаза 5-E: исполняет операции и возвращает (сообщения, записи_истории).
+    Каждая мутация даёт запись для undo; прежнее содержимое бэкапится (до 50КБ)."""
+    res, records = [], []
     for op in ops:
         try:
             full, rel = safe_path(vault, op["path"])
             if op["op"] == "create_note":
                 os.makedirs(os.path.dirname(full), exist_ok=True)
                 existed = os.path.exists(full)
+                prev = None
+                if existed:
+                    with open(full, encoding="utf-8", errors="replace") as f:
+                        prev = f.read()[:50000]
                 with open(full, "w", encoding="utf-8", newline="\n") as f:
                     f.write(op.get("content") or "")
                 res.append(("перезаписано: " if existed else "создано: ") + rel)
+                records.append({"op": "edit_note" if existed else "create_note",
+                                "path": rel, "prev": prev})
+            elif op["op"] == "edit_note":
+                if not os.path.exists(full):
+                    raise ValueError("файл не найден: " + rel)
+                with open(full, encoding="utf-8", errors="replace") as f:
+                    prev = f.read()[:50000]
+                with open(full, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(op.get("content") or "")
+                res.append("правка сохранена: " + rel)
+                records.append({"op": "edit_note", "path": rel, "prev": prev})
             elif op["op"] == "rename":
                 full2, rel2 = safe_path(vault, op["to"])
                 os.makedirs(os.path.dirname(full2), exist_ok=True)
@@ -118,13 +136,15 @@ def execute(vault, ops):
                     raise ValueError("цель уже существует: " + rel2)
                 os.rename(full, full2)
                 res.append("переименовано: " + rel + " -> " + rel2)
+                records.append({"op": "rename", "path": rel, "to": rel2})
             elif op["op"] == "move":
                 full2, rel2 = safe_path(vault, op["to"])
                 os.makedirs(full2, exist_ok=True)
                 dest = os.path.join(full2, os.path.basename(full))
                 os.replace(full, dest)
-                res.append("перемещено: " + rel + " -> "
-                           + os.path.relpath(dest, vault).replace(os.sep, "/"))
+                dest_rel = os.path.relpath(dest, vault).replace(os.sep, "/")
+                res.append("перемещено: " + rel + " -> " + dest_rel)
+                records.append({"op": "move", "path": rel, "to": dest_rel})
             elif op["op"] == "read":
                 with open(full, encoding="utf-8") as f:
                     res.append("чтение " + rel + ":\n" + f.read()[:2000])
@@ -134,4 +154,4 @@ def execute(vault, ops):
                 res.append("список " + (rel or ".") + ": " + ", ".join(names))
         except Exception as e:
             res.append("ошибка: " + str(e))
-    return res
+    return res, records
