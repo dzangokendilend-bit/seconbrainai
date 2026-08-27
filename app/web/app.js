@@ -634,26 +634,85 @@ async function tabAna(p) {
     '<div class="warn" style="margin-top:18px">Аналитика видит только твой vault. Использование для слежки за людьми запрещено — я откажусь и объясню.</div>';
 }
 
-/* ── настройки: ключи + модули в стиле cs-menu ── */
+/* ── настройки ×3: Профиль / Модели и ключи / Модули (Фаза 5-D) ── */
+let SET_TAB = "profile";
+const SVC_NAMES = {glm: "GLM 5.3 Fast", smart: "OpenRouter", luna: "ChatGPT 5.6 Luna"};
+
 function tabSet(p) {
-  const mods = p.modules;
-  const kmask = p.keys_masked || {};
-  const modName = {wikipedia: "Википедия", telegram: "Telegram-бот", analytics: "Полная аналитика"};
+  const tabs = [["profile", "Профиль"], ["keys", "Модели и ключи"], ["modules", "Модули"]];
   $("m-body").innerHTML =
+    '<div class="set-tabs">' + tabs.map(t =>
+      '<button class="set-tab' + (SET_TAB === t[0] ? " on" : "") + '" data-t="' + t[0] + '">' + t[1] + "</button>").join("") +
+    '</div><div id="s-body"></div><div class="err" id="s-err"></div>';
+  $("m-body").querySelectorAll(".set-tab").forEach(b =>
+    b.onclick = () => { SET_TAB = b.dataset.t; tabSet(p); });
+  if (SET_TAB === "profile") setTabProfile(p);
+  else if (SET_TAB === "keys") setTabKeys(p);
+  else setTabModules(p);
+}
+
+function setOk(msg) { const e = $("s-err"); if (e) { e.style.color = "#6be08a"; e.textContent = msg; } }
+function setFail(msg) { const e = $("s-err"); if (e) { e.style.color = ""; e.textContent = msg; } }
+
+function setTabProfile(p) {
+  $("s-body").innerHTML =
+    '<div class="cs-menu"><div class="cs-menu-h">Юзернейм</div>' +
+    '<div class="mrow" style="padding:4px 12px 12px"><input class="minput" id="p-user" style="margin:0" value="' + esc(p.username) + '">' +
+    '<button class="cs-act primary" id="p-user-go">Сохранить</button></div></div>' +
+    '<div class="cs-menu"><div class="cs-menu-h">Аватарка (png/jpeg, до 300 КБ)</div>' +
+    '<div class="mrow" style="padding:4px 12px 12px"><input id="p-ava" type="file" accept="image/png,image/jpeg">' +
+    '<button class="cs-act primary" id="p-ava-go">Загрузить</button></div></div>' +
+    '<div class="cs-menu"><div class="cs-menu-h">Смена пароля</div>' +
+    '<div style="padding:6px 12px 14px">' +
+    '<input class="minput" type="password" id="p-old" placeholder="текущий пароль" autocomplete="current-password">' +
+    '<input class="minput" type="password" id="p-new" placeholder="новый пароль (мин. 6)" autocomplete="new-password">' +
+    '<input class="minput" type="password" id="p-new2" placeholder="повтори новый пароль" autocomplete="new-password">' +
+    '<button class="cs-act primary" id="p-pass-go">Сменить пароль</button>' +
+    '<div class="sub" style="margin-top:8px">После смены пароля все устройства выйдут из аккаунта.</div></div></div>';
+  $("p-user-go").onclick = async () => {
+    const r = await api("/api/profile/username", {username: $("p-user").value.trim()});
+    if (r.data.error) return setFail(r.data.error);
+    ME.username = r.data.username;
+    const un = document.querySelector(".profcard .un");
+    if (un) un.textContent = r.data.username;
+    setOk("юзернейм обновлён");
+  };
+  $("p-ava-go").onclick = () => {
+    const f = $("p-ava").files[0];
+    if (!f) return setFail("выбери файл");
+    if (f.size > 300 * 1024) return setFail("файл больше 300 КБ");
+    const rd = new FileReader();
+    rd.onload = async () => {
+      const r = await api("/api/profile/avatar", {avatar: rd.result});
+      if (r.data.error) return setFail(r.data.error);
+      setOk("аватарка обновлена — обнови раздел (кнопка слева)");
+    };
+    rd.readAsDataURL(f);
+  };
+  $("p-pass-go").onclick = async () => {
+    if ($("p-new").value !== $("p-new2").value) return setFail("новые пароли не совпадают");
+    const r = await api("/api/profile/password",
+      {old_password: $("p-old").value, new_password: $("p-new").value});
+    if (r.data.error) return setFail(r.data.error);
+    await api("/api/logout", {});
+    location.reload();
+  };
+}
+
+function setTabKeys(p) {
+  const kmask = p.keys_masked || {};
+  $("s-body").innerHTML =
     '<div class="cs-menu"><div class="cs-menu-h">Модель по умолчанию</div>' +
     '<div id="s-mlist" style="padding:8px 12px 12px"></div></div>' +
-    '<div class="cs-menu"><div class="cs-menu-h">Ключи API (маскированы, можно сменить)</div>' +
-    ["glm", "smart", "luna"].map(s =>
-      '<div class="cs-menu-row">' + s + ': <b>' + (kmask[s] || "не задан") + '</b>' +
-      '<button class="cs-act" data-s="' + s + '">сменить</button></div>').join("") +
-    '<div class="mrow" style="padding:4px 12px 12px"><input class="minput" id="s-val" style="margin:0" placeholder="новое значение ключа">' +
-    '<button class="cs-act primary" id="s-apply">Применить</button></div></div>' +
-    '<div class="cs-menu"><div class="cs-menu-h">Модули</div>' +
-    Object.keys(modName).map(k =>
-      '<button class="cs-menu-row" data-m="' + k + '">' + modName[k] +
-      '<span class="cs-sw' + (mods[k] ? " on" : "") + '"></span></button>').join("") +
-    '<div class="cs-menu-note">Аналитика сырая: включается паролем закрытого тестирования, работает только с твоим vault.</div></div>' +
-    '<div class="err" id="s-err"></div>';
+    '<div class="cs-menu"><div class="cs-menu-h">Ключи API (маскированы)</div>' +
+    Object.keys(SVC_NAMES).map(s =>
+      '<div class="cs-menu-row">' + SVC_NAMES[s] + ': <b>' + (kmask[s] || "не задан") + '</b>' +
+      '<span><button class="cs-act" data-check="' + s + '">проверить</button> ' +
+      '<button class="cs-act" data-s="' + s + '">сменить</button></span></div>').join("") +
+    '<div class="mrow" style="padding:4px 12px 12px"><select class="minput" id="k-svc" style="margin:0;width:auto">' +
+    Object.keys(SVC_NAMES).map(s => "<option>" + s + "</option>").join("") + "</select>" +
+    '<input class="minput" id="s-val" style="margin:0" placeholder="новое значение ключа">' +
+    '<button class="cs-act primary" id="s-apply">Применить</button></div></div>';
   /* Фаза 5-B: секция «Модель по умолчанию» из реестра */
   ensureCFGM().then(c => {
     const box = $("s-mlist");
@@ -675,7 +734,44 @@ function tabSet(p) {
     };
     draw(((ME.onboarding.prefs || {}).model) || c.default_model);
   });
-  $("m-body").querySelectorAll(".cs-menu-row[data-m]").forEach(row => row.onclick = async () => {
+  const saveKey = async (svc, val, check) => {
+    const r = await api("/api/keys", {service: svc, value: val, check: check});
+    if (r.data.error) return setFail(r.data.error);
+    ME.keys_masked = r.data.keys_masked;
+    if (r.data.check) {
+      if (r.data.check.ok) setOk("ключ сохранён · " + r.data.check.message);
+      else setFail("ключ сохранён, но проверка не прошла: " + r.data.check.message);
+    } else setOk("ключ сохранён");
+    tabSet(ME);
+  };
+  $("m-body").querySelectorAll(".cs-act[data-s]").forEach(b =>
+    b.onclick = () => {
+      const val = prompt("Новый ключ для " + (SVC_NAMES[b.dataset.s] || b.dataset.s) + ":");
+      if (val) saveKey(b.dataset.s, val.trim(), false);
+    });
+  $("m-body").querySelectorAll(".cs-act[data-check]").forEach(b =>
+    b.onclick = async () => {
+      const r = await api("/api/profile/key-check", {service: b.dataset.check});
+      if (r.data.error) return setFail(r.data.error);
+      if (r.data.ok) setOk((SVC_NAMES[b.dataset.check] || b.dataset.check) + ": " + r.data.message);
+      else setFail((SVC_NAMES[b.dataset.check] || b.dataset.check) + ": " + r.data.message);
+    });
+  $("s-apply").onclick = () => {
+    const val = $("s-val").value.trim();
+    if (val) saveKey($("k-svc").value, val, true);
+  };
+}
+
+function setTabModules(p) {
+  const mods = p.modules;
+  const modName = {wikipedia: "Википедия", telegram: "Telegram-бот", analytics: "Полная аналитика"};
+  $("s-body").innerHTML =
+    '<div class="cs-menu"><div class="cs-menu-h">Модули</div>' +
+    Object.keys(modName).map(k =>
+      '<button class="cs-menu-row" data-m="' + k + '">' + modName[k] +
+      '<span class="cs-sw' + (mods[k] ? " on" : "") + '"></span></button>').join("") +
+    '<div class="cs-menu-note">Аналитика сырая: включается паролем закрытого тестирования, работает только с твоим vault.</div></div>';
+  $("s-body").querySelectorAll(".cs-menu-row[data-m]").forEach(row => row.onclick = async () => {
     const m = row.dataset.m;
     let pass = null;
     if (m === "analytics" && !mods.analytics_unlocked && !mods[m]) {
@@ -683,24 +779,10 @@ function tabSet(p) {
       if (pass === null) return;
     }
     const r = await api("/api/modules", {module: m, enabled: !mods[m], password: pass});
-    if (r.data.error) { $("s-err").textContent = r.data.error; return; }
+    if (r.data.error) return setFail(r.data.error);
     p.modules = r.data.modules;
     tabSet(p);
   });
-  $("m-body").querySelectorAll(".cs-act[data-s]").forEach(b => b.onclick = async () => {
-    const val = prompt("Новый ключ для " + b.dataset.s + ":");
-    if (!val) return;
-    const r = await api("/api/keys", {service: b.dataset.s, value: val});
-    if (r.data.ok) { ME.keys_masked = r.data.keys_masked; tabSet(ME); }
-    else $("s-err").textContent = r.data.error;
-  });
-  $("s-apply").onclick = async () => {
-    const svc = prompt("Для какого сервиса? (glm / smart / luna)");
-    if (!svc) return;
-    const r = await api("/api/keys", {service: svc, value: $("s-val").value.trim()});
-    if (r.data.ok) { ME.keys_masked = r.data.keys_masked; tabSet(ME); }
-    else $("s-err").textContent = r.data.error;
-  };
 }
 
 /* ── загрузка ── */

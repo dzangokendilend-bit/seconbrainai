@@ -93,12 +93,17 @@ const consoleErrors = [], badResponses = [];
   await tab("wiki", "#wk-q", "поиск по заметкам");
   await tab("tg", "#tg-body", "статус бота");
   await tab("ana", ".stat-grid", "сводка аналитики");
-  await tab("set", "#s-apply", "настройки ключей");
-  /* Фаза 5-B: секция «Модель по умолчанию» в настройках */
-  await new Promise(r => setTimeout(r, 400));
+  await tab("set", ".set-tab.on", "вкладки настроек");
+  const setTabs = await page.$$eval(".set-tab", els => els.length).catch(() => 0);
+  ok("настройки: 3 вкладки — Профиль/Модели и ключи/Модули (факт " + setTabs + ")", setTabs === 3);
+  ok("настройки: профиль по умолчанию — форма юзернейма", await page.$("#p-user"));
+  /* Фаза 5-B/5-D: вкладка «Модели и ключи» */
+  await page.click('.set-tab[data-t="keys"]');
+  await new Promise(r => setTimeout(r, 500));
   ok("настройки: секция «Модель по умолчанию»", await page.$("#s-mlist .chip"));
   const setChips = await page.$$eval("#s-mlist .chip", els => els.length).catch(() => 0);
   ok("настройки: карточки моделей из реестра (факт " + setChips + ")", setChips >= 3);
+  ok("настройки: кнопка «проверить» у ключей", await page.$(".cs-act[data-check]"));
   const bodyTxt = await page.$eval("body", el => el.textContent).catch(() => "");
   ok("настройки: ox alpha отсутствует в UI", !/ox.?alpha/i.test(bodyTxt));
   await tab("chat", ".beta", "баннер закрытой беты");

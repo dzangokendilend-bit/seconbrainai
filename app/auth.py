@@ -121,6 +121,43 @@ def save_avatar(uid, data_url):
     return name
 
 
+# ── Профиль: смена юзернейма/пароля (Фаза 5-D) ──
+
+def change_username(uid, new_username):
+    """Валидация + уникальность + обновление index.json и профиля.
+    Сессии хранят uid, поэтому живут — перелогин не нужен."""
+    e = username_error(new_username)
+    if e:
+        return None, e
+    p = load_profile(uid)
+    idx = _load_index()
+    old_key = p["username"].lower()
+    if old_key in idx:
+        idx.pop(old_key)
+    idx[new_username.lower()] = uid
+    _save_index(idx)
+    p["username"] = new_username
+    save_profile(uid, p)
+    return p, None
+
+
+def verify_password(uid, password):
+    p = load_profile(uid)
+    return hmac.compare_digest(p["password_hash"], hash_password(password, p["salt"]))
+
+
+def change_password(uid, new_password):
+    if len(new_password or "") < 6:
+        return None, "пароль: минимум 6 символов"
+    p = load_profile(uid)
+    salt = secrets.token_hex(16)
+    p["salt"] = salt
+    p["password_hash"] = hash_password(new_password, salt)
+    save_profile(uid, p)
+    drop_all_sessions(uid)  # безопасность: все устройства перелогинятся
+    return p, None
+
+
 # ── Сессии ──
 
 def _sessions_path():
@@ -167,3 +204,11 @@ def drop_session(token):
     if token in s:
         s.pop(token)
         _save_sessions(s)
+
+
+def drop_all_sessions(uid):
+    """Инвалидация всех сессий пользователя (после смены пароля)."""
+    s = _load_sessions()
+    left = {t: r for t, r in s.items() if r.get("uid") != uid}
+    if len(left) != len(s):
+        _save_sessions(left)

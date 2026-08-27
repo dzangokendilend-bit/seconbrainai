@@ -242,8 +242,12 @@ class Handler(BaseHTTPRequestHandler):
             cur = keys_mod.load_keys(config.MACHINE_SECRET, uid)
             cur[svc] = value
             keys_mod.save_keys(config.MACHINE_SECRET, uid, cur)
-            self._json({"ok": True, "keys_masked":
-                        {s: keys_mod.mask(k) for s, k in cur.items()}})
+            resp = {"ok": True, "keys_masked":
+                    {s: keys_mod.mask(k) for s, k in cur.items()}}
+            if body.get("check"):
+                ok, msg = providers.ping(svc, value)
+                resp["check"] = {"ok": ok, "message": msg}
+            self._json(resp)
             return
 
         if path == "/api/modules":
@@ -277,6 +281,56 @@ class Handler(BaseHTTPRequestHandler):
             prefs["model"] = mid
             auth.save_profile(uid, p)
             self._json({"ok": True, "model": mid})
+            return
+
+        if path == "/api/profile/username":
+            # Фаза 5-D: смена юзернейма (сессии живут — хранят uid)
+            p, err = auth.change_username(uid, (body.get("username") or "").strip())
+            if err:
+                self._json({"error": err}, 400)
+                return
+            self._json({"ok": True, "username": p["username"]})
+            return
+
+        if path == "/api/profile/avatar":
+            try:
+                name = auth.save_avatar(uid, body.get("avatar"))
+            except ValueError as e:
+                self._json({"error": str(e)}, 400)
+                return
+            if not name:
+                self._json({"error": "нужен dataURL png/jpeg"}, 400)
+                return
+            p = auth.load_profile(uid)
+            p["avatar"] = name
+            auth.save_profile(uid, p)
+            self._json({"ok": True, "avatar": name})
+            return
+
+        if path == "/api/profile/password":
+            # Фаза 5-D: смена пароля — старый обязателен, все сессии инвалидируются
+            if not auth.verify_password(uid, body.get("old_password") or ""):
+                self._json({"error": "текущий пароль неверен"}, 403)
+                return
+            p, err = auth.change_password(uid, body.get("new_password") or "")
+            if err:
+                self._json({"error": err}, 400)
+                return
+            self._json({"ok": True, "relogin": True})
+            return
+
+        if path == "/api/profile/key-check":
+            # Фаза 5-D: проверка живости уже сохранённого ключа
+            svc = body.get("service")
+            if svc not in onboarding.KEY_SERVICES:
+                self._json({"error": "сервис неизвестен"}, 400)
+                return
+            user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
+            if not user_keys.get(svc):
+                self._json({"error": "ключ не задан"}, 400)
+                return
+            ok, msg = providers.ping(svc, user_keys[svc])
+            self._json({"ok": ok, "message": msg})
             return
 
         if path == "/api/chat":

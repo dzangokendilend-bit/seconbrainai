@@ -50,6 +50,38 @@ def mock_chat(messages):
     return json.dumps({"reply": reply, "ops": ops}, ensure_ascii=False)
 
 
+def ping(service, api_key, timeout=20):
+    """Фаза 5-D: проверка живости ключа — минимальный запрос max_tokens=1.
+    Возвращает (ok, сообщение)."""
+    if config.CFG.get("mock_llm"):
+        return True, "mock-режим: ключ не проверялся"
+    prov = (config.CFG.get("providers") or {}).get(service) or {}
+    base = (prov.get("base_url") or "").rstrip("/")
+    model_id = prov.get("model")
+    if not base or not model_id:
+        return False, "провайдер не настроен"
+    payload = json.dumps({"model": model_id, "messages": [{"role": "user", "content": "ping"}],
+                          "max_tokens": 1}).encode("utf-8")
+    req = urllib.request.Request(base + "/chat/completions", data=payload, headers={
+        "Content-Type": "application/json", "Authorization": "Bearer " + api_key})
+    if service == "smart":
+        req.add_header("HTTP-Referer", "http://localhost")
+        req.add_header("X-Title", "Monica")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            json.loads(r.read().decode("utf-8"))
+        return True, "ключ работает"
+    except Exception as e:
+        msg = str(e)
+        try:
+            body = e.read().decode("utf-8", "replace")[:300]
+            err = json.loads(body).get("error")
+            msg = err.get("message", body) if isinstance(err, dict) else body
+        except Exception:
+            pass
+        return False, msg
+
+
 
 def chat_stream(service, api_key, model, messages, timeout=120):
     """То же, что chat(), но выдаёт ответ кусочками (генератор).
