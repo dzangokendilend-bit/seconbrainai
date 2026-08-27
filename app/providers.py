@@ -47,3 +47,47 @@ def mock_chat(messages):
     else:
         reply = "[mock] Принял: «" + last[:200] + "». mock_llm=true в config.json — реальный режим включится с твоими ключами."
     return json.dumps({"reply": reply, "ops": ops}, ensure_ascii=False)
+
+
+
+def chat_stream(service, api_key, model, messages, timeout=120):
+    """То же, что chat(), но выдаёт ответ кусочками (генератор).
+    Mock стримит по словам с паузой, реальный провайдер — SSE-дельты."""
+    import time as _t
+    if config.CFG.get("mock_llm"):
+        text = mock_chat(messages)
+        try:
+            text = json.loads(text).get("reply", text)
+        except Exception:
+            pass
+        for word in text.split(" "):
+            yield word + " "
+            _t.sleep(0.025)
+        return
+    prov = (config.CFG.get("providers") or {}).get(service) or {}
+    base = (prov.get("base_url") or "").rstrip("/")
+    model_id = prov.get("model") or model
+    if not base or not api_key:
+        raise RuntimeError("провайдер " + service + " не настроен")
+    payload = json.dumps({"model": model_id, "messages": messages,
+                          "temperature": 0.6, "stream": True}).encode("utf-8")
+    req = urllib.request.Request(base + "/chat/completions", data=payload, headers={
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + api_key})
+    if service == "smart":
+        req.add_header("HTTP-Referer", "http://localhost")
+        req.add_header("X-Title", "Monica")
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        for raw in r:
+            line = raw.decode("utf-8", "replace").strip()
+            if not line.startswith("data:"):
+                continue
+            chunk = line[5:].strip()
+            if chunk == "[DONE]":
+                break
+            try:
+                delta = json.loads(chunk)["choices"][0]["delta"].get("content")
+            except Exception:
+                continue
+            if delta:
+                yield delta

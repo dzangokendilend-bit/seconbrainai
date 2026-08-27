@@ -290,17 +290,106 @@ function addMsg(role, text) {
   box.scrollTop = box.scrollHeight;
 }
 
+function esc(s) {
+  return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function inline(x) {
+  return x.replace(/`([^`]+)`/g, (m, c) => "<code>" + c + "</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/\*([^*\\n]+)\*/g, "<i>$1</i>")
+    .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+}
+
+function md(src) {
+  let s = esc(src);
+  s = s.replace(/```([\s\S]*?)```/g, (m, c) => "<pre><code>" + c.replace(/^\n/, "") + "</code></pre>");
+  const out = [];
+  let inUl = false, inOl = false;
+  const closeLists = () => {
+    if (inUl) { out.push("</ul>"); inUl = false; }
+    if (inOl) { out.push("</ol>"); inOl = false; }
+  };
+  for (const ln of s.split("\n")) {
+    let m;
+    if ((m = ln.match(/^###\s+(.*)/))) { closeLists(); out.push("<h3>" + inline(m[1]) + "</h3>"); }
+    else if ((m = ln.match(/^##\s+(.*)/))) { closeLists(); out.push("<h2>" + inline(m[1]) + "</h2>"); }
+    else if ((m = ln.match(/^#\s+(.*)/))) { closeLists(); out.push("<h2>" + inline(m[1]) + "</h2>"); }
+    else if ((m = ln.match(/^&gt;\s?(.*)/))) { closeLists(); out.push("<blockquote>" + inline(m[1]) + "</blockquote>"); }
+    else if ((m = ln.match(/^[-*]\s+(.*)/))) {
+      if (!inUl) { closeLists(); out.push("<ul>"); inUl = true; }
+      out.push("<li>" + inline(m[1]) + "</li>");
+    } else if ((m = ln.match(/^\d+[.)]\s+(.*)/))) {
+      if (!inOl) { closeLists(); out.push("<ol>"); inOl = true; }
+      out.push("<li>" + inline(m[1]) + "</li>");
+    } else if (ln.trim() === "") { closeLists(); }
+    else { closeLists(); out.push("<p>" + inline(ln) + "</p>"); }
+  }
+  closeLists();
+  return out.join("");
+}
+
+function boxScroll() {
+  const b = $("msgs") || $("tmsgs");
+  if (b) b.scrollTop = b.scrollHeight;
+}
+
+function addTyping(boxId) {
+  const d = document.createElement("div");
+  d.className = "msg bot";
+  d.innerHTML = '<span class="typing-dots"><i></i><i></i><i></i></span>';
+  const box = $(boxId);
+  box.appendChild(d);
+  box.scrollTop = box.scrollHeight;
+  return d;
+}
+
+let LAST_CHAT_MSG = null;
+
 async function sendChat() {
   const inp = $("chat-in");
   const text = inp.value.trim();
   if (!text) return;
-  addMsg("user", text);
   inp.value = "";
+  await chatTurn(text);
+}
+
+async function chatTurn(text) {
+  addMsg("user", text);
   CHAT_HIST.push({role: "user", content: text});
-  const r = await api("/api/chat", {message: text, history: CHAT_HIST.slice(-20)});
-  const reply = r.data.reply || r.data.error || "…";
-  addMsg("bot", reply);
-  CHAT_HIST.push({role: "assistant", content: reply});
+  LAST_CHAT_MSG = text;
+  const b = addTyping("msgs");
+  try {
+    const r = await fetch("/api/chat/stream", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({message: text, history: CHAT_HIST.slice(-20)})});
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      throw new Error(e.error || "HTTP " + r.status);
+    }
+    b.className = "msg bot";
+    b.textContent = "";
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let acc = "";
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      acc += dec.decode(chunk.value, {stream: true});
+      b.textContent = acc;
+      boxScroll();
+    }
+    b.innerHTML = '<div class="md">' + md(acc) + "</div>";
+    CHAT_HIST.push({role: "assistant", content: acc});
+  } catch (e) {
+    b.className = "msg bot err-bubble";
+    b.innerHTML = "<span>⚠️ " + esc(String(e.message || e)) + "</span>";
+    const rb = document.createElement("button");
+    rb.textContent = "Повторить";
+    rb.onclick = () => { b.remove(); chatTurn(text); };
+    b.appendChild(rb);
+  }
+  boxScroll();
 }
 
 function tabTerm(p) {
@@ -329,7 +418,9 @@ async function sendTerm() {
   if (!text) return;
   addTMsg("user", text);
   inp.value = "";
+  const tb = addTyping("tmsgs");
   const r = await api("/api/terminal", {message: text});
+  if (tb) tb.remove();
   if (r.data.error) { addTMsg("bot", "⚠️ " + r.data.error); return; }
   addTMsg("bot", r.data.reply || "…");
   const ops = r.data.ops || [];

@@ -287,6 +287,41 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"reply": reply, "model": model})
             return
 
+        if path == "/api/chat/stream":
+            text = (body.get("message") or "").strip()
+            if not text:
+                self._json({"error": "пустое сообщение"}, 400)
+                return
+            p = auth.load_profile(uid)
+            model = (p.get("onboarding", {}).get("prefs") or {}).get("model", "gpt-5.6-luna")
+            service = MODEL_SERVICE.get(model, "luna")
+            user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
+            if not user_keys.get(service):
+                self._json({"error": "нет ключа для сервиса " + service + " — добавь в настройках"}, 400)
+                return
+            history = body.get("history") or []
+            messages = [{"role": "system", "content": CHAT_SYSTEM}]
+            for m in history[-20:]:
+                if isinstance(m, dict) and m.get("role") in ("user", "assistant"):
+                    messages.append({"role": m["role"], "content": str(m.get("content"))[:4000]})
+            messages.append({"role": "user", "content": text})
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            try:
+                for delta in providers.chat_stream(service, user_keys[service], model, messages):
+                    if delta:
+                        self.wfile.write(delta.encode("utf-8"))
+                        self.wfile.flush()
+            except Exception as e:
+                try:
+                    self.wfile.write(("\n\n⚠️ модель прервалась: " + str(e)).encode("utf-8"))
+                    self.wfile.flush()
+                except Exception:
+                    pass
+            return
+
         if path == "/api/terminal":
             text = (body.get("message") or "").strip()
             if not text:
