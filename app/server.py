@@ -12,8 +12,15 @@ import auth
 import config
 import keys as keys_mod
 import onboarding
+import providers
+import terminal as term
 
 COOKIE = "monica_session"
+MODEL_SERVICE = {"glm-5.3-fast": "glm", "smart": "smart", "gpt-5.6-luna": "luna"}
+CHAT_SYSTEM = ("Ты — Моника, личный ИИ-ассистент пользователя внутри веб-сервиса Моника. "
+               "Дружелюбно, просто, без воды. Помогаешь с заметками, модулями и вопросами. "
+               "Если нужен ключ или модуль не включён — подскажи зайти в настройки. "
+               "Работаешь только с данными этого пользователя.")
 MAX_BODY = 2 * 1024 * 1024  # 2 МБ (аватарки dataURL)
 
 
@@ -233,6 +240,75 @@ class Handler(BaseHTTPRequestHandler):
             p["modules"] = mods
             auth.save_profile(uid, p)
             self._json({"ok": True, "modules": mods})
+            return
+
+        if path == "/api/chat":
+            text = (body.get("message") or "").strip()
+            if not text:
+                self._json({"error": "пустое сообщение"}, 400)
+                return
+            p = auth.load_profile(uid)
+            model = (p.get("onboarding", {}).get("prefs") or {}).get("model", "gpt-5.6-luna")
+            service = MODEL_SERVICE.get(model, "luna")
+            user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
+            if not user_keys.get(service):
+                self._json({"error": "нет ключа для сервиса " + service + " — добавь в настройках"}, 400)
+                return
+            history = body.get("history") or []
+            messages = [{"role": "system", "content": CHAT_SYSTEM}]
+            for m in history[-20:]:
+                if isinstance(m, dict) and m.get("role") in ("user", "assistant"):
+                    messages.append({"role": m["role"], "content": str(m.get("content"))[:4000]})
+            messages.append({"role": "user", "content": text})
+            try:
+                reply = providers.chat(service, user_keys[service], model, messages)
+            except Exception as e:
+                self._json({"error": "модель недоступна: " + str(e)}, 502)
+                return
+            if config.CFG.get("mock_llm"):
+                # mock возвращает JSON {reply, ops} — для чата берём только текст.
+                try:
+                    reply = json.loads(reply).get("reply", reply)
+                except Exception:
+                    pass
+            self._json({"reply": reply, "model": model})
+            return
+
+        if path == "/api/terminal":
+            text = (body.get("message") or "").strip()
+            if not text:
+                self._json({"error": "пустое сообщение"}, 400)
+                return
+            user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
+            if not user_keys.get("glm"):
+                self._json({"error": "терминалу нужен ключ GLM — добавь в настройках"}, 400)
+                return
+            vault = os.path.join(auth.user_dir(uid), "vault")
+            messages = [{"role": "system", "content": term.system_prompt(vault)},
+                        {"role": "user", "content": text[:4000]}]
+            try:
+                raw = providers.chat("glm", user_keys["glm"], "glm-5.3-fast", messages)
+            except Exception as e:
+                self._json({"error": "модель недоступна: " + str(e)}, 502)
+                return
+            reply, ops = term.parse_model_reply(raw)
+            clean, errs = term.validate_ops(vault, ops)
+            for e in errs:
+                reply += chr(10) + "⚠️ " + e
+            self._json({"reply": reply, "ops": clean,
+                        "note": "подтверди выполнение операций" if clean else None})
+            return
+
+        if path == "/api/terminal/execute":
+            vault = os.path.join(auth.user_dir(uid), "vault")
+            clean, errs = term.validate_ops(vault, body.get("ops"))
+            if errs:
+                self._json({"error": "; ".join(errs)}, 400)
+                return
+            if not clean:
+                self._json({"error": "нет операций для выполнения"}, 400)
+                return
+            self._json({"results": term.execute(vault, clean)})
             return
 
         self._json({"error": "неизвестный маршрут"}, 404)

@@ -1,0 +1,49 @@
+# LLM-провайдеры Моники: OpenAI-совместимый протокол, ключи пользователей.
+# Сервисы: glm (терминал/быстрые), smart (ядро анализа), luna (чат/бот).
+# Базовые URL и id моделей — в config.json (секция providers).
+# mock_llm=true в config.json — тестовый режим без реальных ключей.
+import json
+import urllib.request
+
+import config
+
+
+def chat(service, api_key, model, messages, timeout=120):
+    if config.CFG.get("mock_llm"):
+        return mock_chat(messages)
+    prov = (config.CFG.get("providers") or {}).get(service) or {}
+    base = (prov.get("base_url") or "").rstrip("/")
+    model_id = prov.get("model") or model
+    if not base or not api_key:
+        raise RuntimeError("провайдер " + service + " не настроен: нет base_url или ключа")
+    payload = json.dumps({"model": model_id, "messages": messages,
+                          "temperature": 0.6}).encode("utf-8")
+    req = urllib.request.Request(base + "/chat/completions", data=payload, headers={
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + api_key})
+    if service == "smart":
+        req.add_header("HTTP-Referer", "http://localhost")
+        req.add_header("X-Title", "Monica")
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        data = json.loads(r.read().decode("utf-8"))
+    return data["choices"][0]["message"]["content"]
+
+
+def mock_chat(messages):
+    last = ""
+    for m in reversed(messages):
+        if m["role"] == "user":
+            last = m["content"]
+            break
+    low = last.lower()
+    ops = []
+    if "создай" in low or "создать" in low or "заметк" in low:
+        ops = [{"op": "create_note", "path": "заметки/из терминала.md",
+                "content": "# Из терминала\n\nЗаметка создана терминалом Моники (mock-режим).\n"}]
+        reply = ("Понял план: создать заметку «заметки/из терминала.md». "
+                 "Проверь операции и подтверди выполнение.")
+    elif "привет" in low or "hello" in low:
+        reply = "[mock] Привет! Я Моника. Спроси что-нибудь или попроси создать заметку."
+    else:
+        reply = "[mock] Принял: «" + last[:200] + "». mock_llm=true в config.json — реальный режим включится с твоими ключами."
+    return json.dumps({"reply": reply, "ops": ops}, ensure_ascii=False)

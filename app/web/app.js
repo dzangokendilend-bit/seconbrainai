@@ -232,46 +232,146 @@ function renderWizard() {
   fetch("/api/models").then(r => r.json()).then(c => { CFG = c; renderStep(); });
 }
 
-// ── экран приложения (каркас, чат появится в фазе 2) ──
+// ── экран приложения: вкладки Чат / Терминал / Настройки ──
+let CHAT_HIST = [];
+
 function renderApp(me) {
   const p = me.profile;
-  shell(`
-    <div style="display:flex;align-items:center;gap:14px">
-      ` + (p.avatar ? '<img class="avatar" src="' + p.avatar + '">' : '<div class="avatar"></div>') + `
-      <div><h1>Привет, ` + p.username + `</h1>
-      <div class="sub">Моника 1.0 · фаза 1: аккаунт и онбординг готовы</div></div>
-    </div>
-    <div class="apps">
-      <a href="#" id="a-keys">Ключи</a><a href="#" id="a-mods">Модули</a>
-      <a href="#" id="a-out">Выйти</a>
-    </div>
-    <div id="a-out2" style="margin-top:14px"></div>
-    <h2 style="margin-top:22px">Модули</h2>
-    <div id="a-modlist"></div>
-    <h2 style="margin-top:22px">Ключи (маскированы)</h2>
-    <div class="sum">` + Object.keys(p.keys_masked).map(k => k + ": <b>" + (p.keys_masked[k] || "не задан") + "</b>").join("<br>") + `</div>`);
+  $("root").innerHTML = `
+    <div class="card app" style="min-height:78vh">
+      <div style="display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--line);padding-bottom:12px">
+        ` + (p.avatar ? '<img class="avatar" src="' + p.avatar + '">' : '<div class="avatar"></div>') + `
+        <div><h1 style="font-size:18px">Моника</h1>
+        <div class="sub">` + p.username + ` · модель: ` + (p.onboarding.prefs?.model || "-") + `</div></div>
+        <span style="flex:1"></span>
+        <button id="a-out">Выйти</button>
+      </div>
+      <div style="display:flex;gap:14px;margin-top:16px;min-height:56vh">
+        <div style="width:140px;flex:none;display:flex;flex-direction:column;gap:8px">
+          <button class="tabbtn sel" data-tab="chat">💬 Чат</button>
+          <button class="tabbtn" data-tab="term">⌨️ Терминал</button>
+          <button class="tabbtn" data-tab="set">⚙️ Настройки</button>
+        </div>
+        <div id="tabbody" style="flex:1;min-width:0"></div>
+      </div>
+    </div>`;
   $("a-out").onclick = async () => { await api("/api/logout", {}); boot(); };
-  $("a-keys").onclick = () => {
-    const svc = prompt("Какой ключ меняем? (glm / smart / luna)");
-    if (!svc) return;
-    const val = prompt("Новый ключ:");
-    if (!val) return;
-    api("/api/keys", {service: svc, value: val}).then(r => {
-      $("a-out2").textContent = r.data.ok ? "ключ обновлён: " + JSON.stringify(r.data.keys_masked) : r.data.error;
+  document.querySelectorAll(".tabbtn").forEach(b => b.onclick = () => {
+    document.querySelectorAll(".tabbtn").forEach(x => x.classList.remove("sel"));
+    b.classList.add("sel");
+    ({chat: tabChat, term: tabTerm, set: tabSet})[b.dataset.tab](p);
+  });
+  tabChat(p);
+}
+
+function tabChat(p) {
+  $("tabbody").innerHTML =
+    '<div id="msgs" class="msgs"></div>' +
+    '<div style="display:flex;gap:8px;margin-top:10px"><input id="chat-in" style="flex:1" placeholder="напиши Монике…"><button class="primary" id="chat-send">→</button></div>';
+  addMsg("bot", "Привет, " + p.username + "! Я Моника. Отвечаю на модели «" + (p.onboarding.prefs?.model || "?") + "». О чём думаем?");
+  $("chat-send").onclick = sendChat;
+  $("chat-in").onkeydown = e => { if (e.key === "Enter") sendChat(); };
+}
+
+function addMsg(role, text) {
+  const d = document.createElement("div");
+  d.className = "msg " + (role === "user" ? "me" : "bot");
+  d.textContent = text;
+  const box = $("msgs") || $("tmsgs");
+  if (!box) return;
+  box.appendChild(d);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function sendChat() {
+  const inp = $("chat-in");
+  const text = inp.value.trim();
+  if (!text) return;
+  addMsg("user", text);
+  inp.value = "";
+  CHAT_HIST.push({role: "user", content: text});
+  const r = await api("/api/chat", {message: text, history: CHAT_HIST.slice(-20)});
+  const reply = r.data.reply || r.data.error || "…";
+  addMsg("bot", reply);
+  CHAT_HIST.push({role: "assistant", content: reply});
+}
+
+function tabTerm(p) {
+  $("tabbody").innerHTML =
+    '<div class="warn">Терминал работает только с твоим vault. Изменения — после твоего подтверждения. Ядра Моники и чужие данные недоступны.</div>' +
+    '<div id="tmsgs" class="msgs"></div>' +
+    '<div style="display:flex;gap:8px;margin-top:10px"><input id="term-in" style="flex:1" placeholder="например: создай заметку идеи/тест.md про flот в Stellaris"><button class="primary" id="term-send">→</button></div>';
+  addTMsg("bot", "Терминал (GLM 5.3 Fast). Попробуй: «создай заметку проекты/тест.md со списком из трёх идей».");
+  $("term-send").onclick = sendTerm;
+  $("term-in").onkeydown = e => { if (e.key === "Enter") sendTerm(); };
+}
+
+function addTMsg(role, text) {
+  const d = document.createElement("div");
+  d.className = "msg " + (role === "user" ? "me" : "bot");
+  d.textContent = text;
+  const box = $("tmsgs");
+  if (!box) return;
+  box.appendChild(d);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function sendTerm() {
+  const inp = $("term-in");
+  const text = inp.value.trim();
+  if (!text) return;
+  addTMsg("user", text);
+  inp.value = "";
+  const r = await api("/api/terminal", {message: text});
+  if (r.data.error) { addTMsg("bot", "⚠️ " + r.data.error); return; }
+  addTMsg("bot", r.data.reply || "…");
+  const ops = r.data.ops || [];
+  if (!ops.length) return;
+  const box = document.createElement("div");
+  box.className = "ops";
+  box.innerHTML = "<b>Предложенные операции:</b><br>" +
+    ops.map(o => "• " + o.op + " → " + (o.path || "") + (o.to ? " → " + o.to : "")).join("<br>") +
+    '<br><button class="primary" style="margin-top:8px" id="ops-go">Выполнить</button>';
+  $("tmsgs").appendChild(box);
+  $("tmsgs").scrollTop = $("tmsgs").scrollHeight;
+  box.querySelector("#ops-go").onclick = async () => {
+    const r2 = await api("/api/terminal/execute", {ops: ops});
+    addTMsg("bot", r2.data.results ? r2.data.results.join("\n") : ("⚠️ " + r2.data.error));
+    box.remove();
+  };
+}
+
+function tabSet(p) {
+  $("tabbody").innerHTML = `
+    <h2>Ключи</h2>
+    <div class="sum">` + Object.keys(p.keys_masked).map(k => k + ": <b>" + (p.keys_masked[k] || "не задан") + "</b>").join("<br>") + `</div>
+    <div class="row"><input id="s-svc" type="text" placeholder="glm / smart / luna" style="max-width:170px">
+    <input id="s-val" type="password" placeholder="новый ключ" style="flex:1">
+    <button id="s-key">Сменить</button></div>
+    <h2 style="margin-top:20px">Модули</h2>
+    <div id="s-mods"></div>
+    <div class="err" id="s-err"></div>`;
+  const draw = mods => {
+    $("s-mods").innerHTML = Object.keys(mods).filter(k => k !== "analytics_unlocked").map(k =>
+      '<div class="mod"><div class="t">' + k + '</div><div class="tg' + (mods[k] ? " on" : "") + '" data-m="' + k + '"></div></div>').join("");
+    $("s-mods").querySelectorAll(".tg").forEach(tg => tg.onclick = async () => {
+      const m = tg.dataset.m;
+      let pass = null;
+      if (m === "analytics" && !mods.analytics_unlocked && !mods.analytics) {
+        pass = prompt("Аналитика сырая, может зацеплять данные других людей. Пароль закрытого тестирования:");
+        if (pass === null) return;
+      }
+      const r = await api("/api/modules", {module: m, enabled: !mods[m], password: pass});
+      if (r.data.error) { $("s-err").textContent = r.data.error; return; }
+      draw(r.data.modules);
     });
   };
-  $("a-mods").onclick = () => {
-    const mod = prompt("Модуль (wikipedia / telegram / analytics):");
-    if (!mod) return;
-    const on = confirm("Включить? (Отмена = выключить)");
-    api("/api/modules", {module: mod, enabled: on}).then(r => {
-      $("a-out2").textContent = r.data.ok ? "модули: " + JSON.stringify(r.data.modules) : r.data.error;
-      boot();
-    });
+  draw(p.modules);
+  $("s-key").onclick = async () => {
+    const r = await api("/api/keys", {service: $("s-svc").value.trim(), value: $("s-val").value.trim()});
+    $("s-err").textContent = r.data.ok ? "ключ обновлён" : r.data.error;
+    if (r.data.ok) boot();
   };
-  $("a-modlist").innerHTML = Object.keys(p.modules)
-    .filter(k => k !== "analytics_unlocked")
-    .map(k => '<div class="mod"><div class="t">' + k + '</div><div>' + (p.modules[k] ? "🟢 вкл" : "🔴 выкл") + "</div></div>").join("");
 }
 
 async function boot() {
