@@ -33,7 +33,8 @@
 ## 2. Где мы сейчас
 
 ```
-31a4787 Phase 5-C: onboarding hero + step glyphs + slide/fade transitions      ← HEAD
+933ef4d Phase 5-D: settings x3 tabs, profile APIs, key liveness check          ← HEAD
+31a4787 Phase 5-C: onboarding hero + step glyphs + slide/fade transitions
 06a3b63 Phase 5-B: model registry, chat quick-switcher, settings default-model
 2ded64f Phase 5-A: beta hatnote, greeting removed, typewriter 2.0
 2d7c312 Phase 4-polish ... (логин, SVG-навигация, профильная карточка, композер)
@@ -54,7 +55,7 @@ fc63244 Phase 2 · 6417c18/6f02e5d Phase 3 · 4894912 Phase 1 · 713a9ee skeleto
 | A | ✅ | hatnote-баннер, минус приветствие, typewriter 2.0 | monica.css, app.js |
 | B | ✅ | реестр моделей, смерть ox alpha, переключатели | onboarding.py, server.py, providers.py, app.js |
 | C | ✅ | hero-приветствие + анимация шагов онбординга (slide+fade, глифы, prefers-reduced-motion) | app.js (renderW), monica.css |
-| D | ☐ | Настройки ×3: Профиль (смена юзернейма/аватара/пароля), Модели и ключи (+проверка живости `max_tokens=1`), Модули; формы вместо prompt() | auth.py (+change_username/change_password), server.py (+3 маршрута), app.js (tabSet) |
+| D | ✅ | Настройки ×3: Профиль (смена юзернейма/аватара/пароля), Модели и ключи (+проверка живости `max_tokens=1`), Модули; формы вместо prompt() | auth.py (+change_username/change_password/drop_all_sessions), server.py (+4 маршрута), providers.py (+ping), app.js (tabSet → setTab*) |
 | E | ☐ | Терминал 2.0: дерево vault / чат⇄md-редактор / лог изменений + undo; op `edit_note`; бэкап перед записью (сейчас execute() молча перезаписывает!); history.jsonl, лимит 500 | terminal.py, tools/history.py (новый), server.py (+tree/read/write/undo), app.js (tabTerm → 3 колонки) |
 | F | ☐ | Личная вики: очередь wiki_queue.json, генератор статей через smart-модель по шаблону Иванопедии, страницы статей, анимация `.wk-open` | modules.py, server.py (+/api/wiki/articles,regen), app.js (tabWiki), monica.css |
 
