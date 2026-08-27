@@ -33,7 +33,8 @@
 ## 2. Где мы сейчас
 
 ```
-62e26fb Phase 5-E: Terminal 2.0 (tree/editor/history+undo), edit_note, backup  ← HEAD
+1053a9c Phase 5-F: personal wiki (auto-articles, queue, viewer, animation)     ← HEAD
+62e26fb Phase 5-E: Terminal 2.0 (tree/editor/history+undo), edit_note, backup
 933ef4d Phase 5-D: settings x3 tabs, profile APIs, key liveness check
 31a4787 Phase 5-C: onboarding hero + step glyphs + slide/fade transitions
 06a3b63 Phase 5-B: model registry, chat quick-switcher, settings default-model
@@ -58,7 +59,9 @@ fc63244 Phase 2 · 6417c18/6f02e5d Phase 3 · 4894912 Phase 1 · 713a9ee skeleto
 | C | ✅ | hero-приветствие + анимация шагов онбординга (slide+fade, глифы, prefers-reduced-motion) | app.js (renderW), monica.css |
 | D | ✅ | Настройки ×3: Профиль (смена юзернейма/аватара/пароля), Модели и ключи (+проверка живости `max_tokens=1`), Модули; формы вместо prompt() | auth.py (+change_username/change_password/drop_all_sessions), server.py (+4 маршрута), providers.py (+ping), app.js (tabSet → setTab*) |
 | E | ✅ | Терминал 2.0: дерево vault / чат⇄md-редактор / лог изменений + undo; op `edit_note`; бэкап перед записью (молчаливая перезапись устранена); history.jsonl, лимит 500 | terminal.py, app/history.py (новый), server.py (+tree/read/write/history/undo), app.js (tabTerm → 3 панели) |
-| F | ☐ | Личная вики: очередь wiki_queue.json, генератор статей через smart-модель по шаблону Иванопедии, страницы статей, анимация `.wk-open` | modules.py, server.py (+/api/wiki/articles,regen), app.js (tabWiki), monica.css |
+| F | ✅ | Личная вики: очередь wiki_queue.json, генератор статей через smart-модель по шаблону Иванопедии, страницы статей, анимация `.wk-open` | modules.py, server.py (+/api/wiki/articles,regen), app.js (tabWiki), monica.css |
+
+**Фаза 5 завершена полностью (A–F).** Следующий шаг — Фаза 6: живые модели.
 
 После каждой подфазы: расширить `tools/ui_smoke.js`, прогнать, коммит, протокол.
 
