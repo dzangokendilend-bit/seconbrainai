@@ -1,5 +1,5 @@
 # LLM-провайдеры Моники: OpenAI-совместимый протокол, ключи пользователей.
-# Сервисы: glm (терминал/быстрые), smart (ядро анализа), luna (чат/бот).
+# Сервисы: glm (терминал/быстрые), smart (OpenRouter, глубокие модели), luna (чат/бот).
 # Базовые URL и id моделей — в config.json (секция providers).
 # mock_llm=true в config.json — тестовый режим без реальных ключей.
 import json
@@ -13,7 +13,8 @@ def chat(service, api_key, model, messages, timeout=120):
         return mock_chat(messages)
     prov = (config.CFG.get("providers") or {}).get(service) or {}
     base = (prov.get("base_url") or "").rstrip("/")
-    model_id = prov.get("model") or model
+    # Фаза 5-B: модель пользователя главнее дефолта из конфига
+    model_id = model or prov.get("model")
     if not base or not api_key:
         raise RuntimeError("провайдер " + service + " не настроен: нет base_url или ключа")
     payload = json.dumps({"model": model_id, "messages": messages,
@@ -66,7 +67,8 @@ def chat_stream(service, api_key, model, messages, timeout=120):
         return
     prov = (config.CFG.get("providers") or {}).get(service) or {}
     base = (prov.get("base_url") or "").rstrip("/")
-    model_id = prov.get("model") or model
+    # Фаза 5-B: модель пользователя главнее дефолта из конфига
+    model_id = model or prov.get("model")
     if not base or not api_key:
         raise RuntimeError("провайдер " + service + " не настроен")
     payload = json.dumps({"model": model_id, "messages": messages,

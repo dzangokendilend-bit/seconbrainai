@@ -76,6 +76,13 @@ const consoleErrors = [], badResponses = [];
   await tab("tg", "#tg-body", "статус бота");
   await tab("ana", ".stat-grid", "сводка аналитики");
   await tab("set", "#s-apply", "настройки ключей");
+  /* Фаза 5-B: секция «Модель по умолчанию» в настройках */
+  await new Promise(r => setTimeout(r, 400));
+  ok("настройки: секция «Модель по умолчанию»", await page.$("#s-mlist .chip"));
+  const setChips = await page.$$eval("#s-mlist .chip", els => els.length).catch(() => 0);
+  ok("настройки: карточки моделей из реестра (факт " + setChips + ")", setChips >= 3);
+  const bodyTxt = await page.$eval("body", el => el.textContent).catch(() => "");
+  ok("настройки: ox alpha отсутствует в UI", !/ox.?alpha/i.test(bodyTxt));
   await tab("chat", ".beta", "баннер закрытой беты");
   const title = await page.$eval("#m-title", el => el.textContent).catch(() => "");
   ok("чат: typewriter-заголовок печатается («" + title + "\u2026»)", title.length > 0);
@@ -84,7 +91,15 @@ const consoleErrors = [], badResponses = [];
   ok("чат: баннер — hatnote.amber Иванопедии (" + bstyle + ")", bstyle === "rgb(208, 160, 74)");
   const greet = await page.$eval("#chat-log", el => el.textContent).catch(() => "");
   ok("чат: фиксированного приветствия нет", !/Привет, .+! Я Моника/.test(greet));
-  ok("чат: модель видна в статусе композера", await page.$("#cs-status .mdl-chip"));
+  /* Фаза 5-B: быстрый переключатель модели в чате */
+  await new Promise(r => setTimeout(r, 400));
+  ok("чат: переключатель модели в композере", await page.$("#cs-status #mdl-btn"));
+  const mdlName = await page.$eval("#mdl-name", el => el.textContent).catch(() => "");
+  ok("чат: имя модели подставлено («" + mdlName + "»)", mdlName.length > 0 && mdlName !== "…");
+  await page.click("#mdl-btn");
+  await new Promise(r => setTimeout(r, 300));
+  const menuItems = await page.$$eval("#mdl-menu button", els => els.length).catch(() => 0);
+  ok("чат: меню моделей открылось, пунктов (факт " + menuItems + ")", menuItems >= 3);
   await page.screenshot({path: path.join(__dirname, "ui_last.png")});
 
   ok("нет ошибок JS в консоли", consoleErrors.length === 0);

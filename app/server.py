@@ -20,7 +20,8 @@ import modules as mon_mods
 import tgbot
 
 COOKIE = "monica_session"
-MODEL_SERVICE = {"glm-5.3-fast": "glm", "smart": "smart", "gpt-5.6-luna": "luna"}
+# Фаза 5-B: карта модель -> сервис генерируется из единого реестра onboarding.MODELS
+MODEL_SERVICE = {m["id"]: m["service"] for m in onboarding.MODELS}
 CHAT_SYSTEM = ("Ты — Моника, личный ИИ-ассистент пользователя внутри веб-сервиса Моника. "
                "Дружелюбно, просто, без воды. Помогаешь с заметками, модулями и вопросами. "
                "Если нужен ключ или модуль не включён — подскажи зайти в настройки. "
@@ -109,7 +110,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"models": onboarding.MODELS,
                         "sources": onboarding.SOURCES,
                         "purposes": onboarding.PURPOSES,
-                        "languages": onboarding.LANGUAGES})
+                        "languages": onboarding.LANGUAGES,
+                        "key_labels": onboarding.KEY_LABELS,
+                        "default_model": onboarding.DEFAULT_MODEL})
             return
         if path in ("/", "/index.html"):
             self._serve_file("index.html", "text/html; charset=utf-8")
@@ -263,13 +266,27 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "modules": mods})
             return
 
+        if path == "/api/prefs/model":
+            # Фаза 5-B: смена модели по умолчанию (чат/настройки)
+            mid = body.get("model")
+            if mid not in MODEL_SERVICE:
+                self._json({"error": "неизвестная модель"}, 400)
+                return
+            p = auth.load_profile(uid)
+            prefs = p.setdefault("onboarding", {}).setdefault("prefs", {})
+            prefs["model"] = mid
+            auth.save_profile(uid, p)
+            self._json({"ok": True, "model": mid})
+            return
+
         if path == "/api/chat":
             text = (body.get("message") or "").strip()
             if not text:
                 self._json({"error": "пустое сообщение"}, 400)
                 return
             p = auth.load_profile(uid)
-            model = (p.get("onboarding", {}).get("prefs") or {}).get("model", "gpt-5.6-luna")
+            model = onboarding.normalize_model(
+                (p.get("onboarding", {}).get("prefs") or {}).get("model"))
             service = MODEL_SERVICE.get(model, "luna")
             user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
             if not user_keys.get(service):
@@ -282,7 +299,8 @@ class Handler(BaseHTTPRequestHandler):
                     messages.append({"role": m["role"], "content": str(m.get("content"))[:4000]})
             messages.append({"role": "user", "content": text})
             try:
-                reply = providers.chat(service, user_keys[service], model, messages)
+                reply = providers.chat(service, user_keys[service],
+                                       onboarding.api_model(model), messages)
             except Exception as e:
                 self._json({"error": "модель недоступна: " + str(e)}, 502)
                 return
@@ -301,7 +319,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "пустое сообщение"}, 400)
                 return
             p = auth.load_profile(uid)
-            model = (p.get("onboarding", {}).get("prefs") or {}).get("model", "gpt-5.6-luna")
+            model = onboarding.normalize_model(
+                (p.get("onboarding", {}).get("prefs") or {}).get("model"))
             service = MODEL_SERVICE.get(model, "luna")
             user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
             if not user_keys.get(service):
@@ -313,12 +332,13 @@ class Handler(BaseHTTPRequestHandler):
                 if isinstance(m, dict) and m.get("role") in ("user", "assistant"):
                     messages.append({"role": m["role"], "content": str(m.get("content"))[:4000]})
             messages.append({"role": "user", "content": text})
+            api_mdl = onboarding.api_model(model)
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             try:
-                for delta in providers.chat_stream(service, user_keys[service], model, messages):
+                for delta in providers.chat_stream(service, user_keys[service], api_mdl, messages):
                     if delta:
                         self.wfile.write(delta.encode("utf-8"))
                         self.wfile.flush()

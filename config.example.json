@@ -3,5 +3,20 @@
   "port": 8900,
   "analytics_password": "CHANGE_ME",
   "machine_secret": "GENERATE_hex64",
-  "session_ttl_hours": 168
+  "session_ttl_hours": 12,
+  "mock_llm": true,
+  "providers": {
+    "glm": {
+      "base_url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+      "model": "glm-5.3-fast"
+    },
+    "smart": {
+      "base_url": "https://openrouter.ai/api/v1/chat/completions",
+      "model": "openrouter/auto"
+    },
+    "luna": {
+      "base_url": "https://api.openai.com/v1/chat/completions",
+      "model": "gpt-5.6-luna"
+    }
+  }
 }

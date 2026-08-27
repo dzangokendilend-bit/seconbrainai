@@ -99,6 +99,16 @@ const W = {step: 1, source: "", purpose: "", username: "", language: "ru", model
   keys: {glm: "", smart: "", luna: ""}, password: "", hint: ""};
 let CFGM = null;
 
+/* ── Фаза 5-B: реестр моделей во фронте ── */
+async function ensureCFGM() {
+  if (!CFGM) CFGM = await (await fetch("/api/models")).json();
+  return CFGM;
+}
+function modelName(id) {
+  const m = ((CFGM && CFGM.models) || []).find(x => x.id === id);
+  return m ? m.name : (id || "?");
+}
+
 function renderWizard() {
   show("scr-wizard");
   W.step = 1;
@@ -173,6 +183,7 @@ function renderW() {
   } else if (W.step === 4) {
     wz.innerHTML = wHead("Основная модель") +
       CFGM.models.map(m => '<div class="mod"><div><div class="t">' + m.name + '</div><div class="d">' + m.role +
+        (m.desc ? " · " + m.desc : "") +
         '</div></div><span class="chip' + (W.model === m.id ? " sel" : "") + '" data-id="' + m.id + '">выбрать</span></div>').join("") +
       '<label>Сколько информации планируешь заносить в день</label>' +
       '<input type="range" id="w-load" min="1" max="10" value="' + W.daily_load + '">' +
@@ -204,9 +215,11 @@ function renderW() {
     });
     wBind(async () => null);
   } else if (W.step === 6) {
-    const ks = {glm: ["GLM 5.3 Fast", "терминал и быстрые операции"],
-      smart: ["Умная модель", "ядро анализа (аналог ox alpha)"],
-      luna: ["ChatGPT 5.6 Luna", "Telegram-бот и чат на сайте"]};
+    /* Фаза 5-B: подписи ключей из реестра моделей (без хардкода ox alpha) */
+    const ks = CFGM.key_labels ||
+      {glm: ["GLM 5.3 Fast", "терминал и быстрые операции"],
+       smart: ["OpenRouter", "глубокие модели для second-brain"],
+       luna: ["ChatGPT 5.6 Luna", "Telegram-бот и чат на сайте"]};
     wz.innerHTML = wHead("API-ключи") +
       '<p class="sub">Ключи шифруются, каждый сервис изолирован. В закрытой бете обязательны.</p>' +
       Object.keys(ks).map(k => '<label>' + ks[k][0] + ' — ' + ks[k][1] + '</label>' +
@@ -348,8 +361,42 @@ function tabChat(p) {
     "</div></form>" +
     '<div class="cs-actions"><span id="cs-status" class="cs-status"></span></div></div>';
   const form = $("chat-form"), input = $("chat-input"), log = $("chat-log");
-  const mdl = (p.onboarding.prefs || {}).model || "?";
-  $("cs-status").innerHTML = '<span class="mdl-chip">отвечаю на «' + esc(mdl) + "»</span>";
+  /* Фаза 5-B: быстрый переключатель модели вместо статичного чипа */
+  const cur = ((p.onboarding.prefs || {}).model) || "";
+  $("cs-status").innerHTML =
+    '<span class="cs-modelwrap"><button type="button" class="cs-modelbtn" id="mdl-btn">' +
+    '<span class="dot"></span><span id="mdl-name">…</span> <span class="chev">▾</span></button>' +
+    '<div class="cs-modelmenu" id="mdl-menu"></div></span>';
+  ensureCFGM().then(c => {
+    const sel = c.models.some(m => m.id === cur) ? cur : c.default_model;
+    $("mdl-name").textContent = modelName(sel);
+    $("mdl-menu").innerHTML = c.models.map(m =>
+      '<button type="button" data-id="' + m.id + '"' + (m.id === sel ? ' class="sel"' : "") + ">" +
+      esc(m.name) + '<span class="d">' + esc((m.desc ? m.desc + " · " : "") + m.role) + "</span></button>").join("");
+    $("mdl-menu").querySelectorAll("button").forEach(b => b.onclick = async () => {
+      const r = await api("/api/prefs/model", {model: b.dataset.id});
+      if (!r.data.ok) return;
+      $("mdl-menu").classList.remove("open");
+      $("mdl-btn").classList.remove("open");
+      $("mdl-name").textContent = modelName(r.data.model);
+      $("mdl-menu").querySelectorAll("button").forEach(x =>
+        x.classList.toggle("sel", x.dataset.id === r.data.model));
+      if (ME.onboarding && ME.onboarding.prefs) ME.onboarding.prefs.model = r.data.model;
+    });
+  });
+  $("mdl-btn").onclick = e => {
+    e.stopPropagation();
+    $("mdl-menu").classList.toggle("open");
+    $("mdl-btn").classList.toggle("open");
+  };
+  if (!window.__mdlDocClose) {
+    window.__mdlDocClose = true;
+    document.addEventListener("click", () => {
+      const m = $("mdl-menu"), b = $("mdl-btn");
+      if (m) m.classList.remove("open");
+      if (b) b.classList.remove("open");
+    });
+  }
   const resize = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px"; };
   input.addEventListener("input", resize);
   input.addEventListener("keydown", e => {
@@ -565,6 +612,8 @@ function tabSet(p) {
   const kmask = p.keys_masked || {};
   const modName = {wikipedia: "Википедия", telegram: "Telegram-бот", analytics: "Полная аналитика"};
   $("m-body").innerHTML =
+    '<div class="cs-menu"><div class="cs-menu-h">Модель по умолчанию</div>' +
+    '<div id="s-mlist" style="padding:8px 12px 12px"></div></div>' +
     '<div class="cs-menu"><div class="cs-menu-h">Ключи API (маскированы, можно сменить)</div>' +
     ["glm", "smart", "luna"].map(s =>
       '<div class="cs-menu-row">' + s + ': <b>' + (kmask[s] || "не задан") + '</b>' +
@@ -577,6 +626,27 @@ function tabSet(p) {
       '<span class="cs-sw' + (mods[k] ? " on" : "") + '"></span></button>').join("") +
     '<div class="cs-menu-note">Аналитика сырая: включается паролем закрытого тестирования, работает только с твоим vault.</div></div>' +
     '<div class="err" id="s-err"></div>';
+  /* Фаза 5-B: секция «Модель по умолчанию» из реестра */
+  ensureCFGM().then(c => {
+    const box = $("s-mlist");
+    if (!box) return;
+    const draw = curMdl => {
+      box.innerHTML = c.models.map(m =>
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0">' +
+        '<div><b style="font-size:13px">' + esc(m.name) + "</b>" +
+        '<div class="sub" style="margin:0">' + esc((m.desc ? m.desc + " · " : "") + m.role) + "</div></div>" +
+        '<span class="chip' + (m.id === curMdl ? " sel" : "") + '" data-id="' + m.id + '">' +
+        (m.id === curMdl ? "текущая" : "выбрать") + "</span></div>").join("");
+      box.querySelectorAll(".chip").forEach(ch => ch.onclick = async () => {
+        const r = await api("/api/prefs/model", {model: ch.dataset.id});
+        if (r.data.ok) {
+          if (ME.onboarding && ME.onboarding.prefs) ME.onboarding.prefs.model = r.data.model;
+          draw(r.data.model);
+        }
+      });
+    };
+    draw(((ME.onboarding.prefs || {}).model) || c.default_model);
+  });
   $("m-body").querySelectorAll(".cs-menu-row[data-m]").forEach(row => row.onclick = async () => {
     const m = row.dataset.m;
     let pass = null;

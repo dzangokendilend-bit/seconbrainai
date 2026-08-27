@@ -6,18 +6,62 @@ import re
 
 import auth
 
+# Единый реестр моделей (Фаза 5-B). ox alpha выведена из системы:
+# сервис smart теперь = OpenRouter, конкретные модели выбирает пользователь.
+# api_model — реальный id для запроса к провайдеру; id — внутренний идентификатор.
 MODELS = [
     {"id": "glm-5.3-fast", "name": "GLM 5.3 Fast", "service": "glm",
-     "role": "терминал и быстрые операции"},
-    {"id": "smart", "name": "Умная модель (ядро анализа, аналог ox alpha)",
-     "service": "smart", "role": "глубокая работа со second-brain"},
+     "role": "терминал и быстрые операции", "desc": "быстрая",
+     "api_model": "glm-5.3-fast"},
+    {"id": "orv-auto", "name": "OpenRouter Auto", "service": "smart",
+     "role": "глубокая работа со second-brain", "desc": "глубокая · роутер сам выберет модель",
+     "api_model": "openrouter/auto"},
+    {"id": "orv-claude", "name": "Claude Sonnet (OpenRouter)", "service": "smart",
+     "role": "глубокая работа со second-brain", "desc": "глубокая · аккуратный длинный текст",
+     "api_model": "anthropic/claude-sonnet-4.5"},
     {"id": "gpt-5.6-luna", "name": "ChatGPT 5.6 Luna", "service": "luna",
-     "role": "Telegram-бот и чат на сайте"},
+     "role": "Telegram-бот и чат на сайте", "desc": "креативная · живой диалог",
+     "api_model": "gpt-5.6-luna"},
 ]
+DEFAULT_MODEL = "gpt-5.6-luna"
 SOURCES = ["друзья", "TikTok", "Instagram", "другое"]
 PURPOSES = ["личный дневник", "знания", "проекты", "другое"]
 LANGUAGES = ["ru", "ua", "en"]
 KEY_SERVICES = ["glm", "smart", "luna"]
+KEY_LABELS = {
+    "glm": ["GLM 5.3 Fast", "терминал и быстрые операции"],
+    "smart": ["OpenRouter", "глубокие модели для second-brain"],
+    "luna": ["ChatGPT 5.6 Luna", "Telegram-бот и чат на сайте"],
+}
+
+
+def service_for(model_id):
+    """Сервис-исполнитель для id модели из реестра (None если неизвестна)."""
+    for m in MODELS:
+        if m["id"] == model_id:
+            return m["service"]
+    return None
+
+
+def api_model(model_id):
+    """Реальный id модели для запроса к провайдеру."""
+    for m in MODELS:
+        if m["id"] == model_id:
+            return m.get("api_model") or model_id
+    return None
+
+
+def normalize_model(model_id):
+    """Миграция старых профилей: устаревший id -> ближайшая валидная модель.
+    Старый 'smart' (ox alpha) -> первая модель сервиса smart."""
+    if model_id in [m["id"] for m in MODELS]:
+        return model_id
+    legacy_service = {"smart": "smart", "ox-alpha": "smart"}.get(model_id)
+    if legacy_service:
+        for m in MODELS:
+            if m["service"] == legacy_service:
+                return m["id"]
+    return DEFAULT_MODEL
 
 
 def validate(payload):
