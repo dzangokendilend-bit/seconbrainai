@@ -247,21 +247,28 @@ function renderApp(me) {
         <button id="a-out">Выйти</button>
       </div>
       <div style="display:flex;gap:14px;margin-top:16px;min-height:56vh">
-        <div style="width:140px;flex:none;display:flex;flex-direction:column;gap:8px">
-          <button class="tabbtn sel" data-tab="chat">💬 Чат</button>
-          <button class="tabbtn" data-tab="term">⌨️ Терминал</button>
-          <button class="tabbtn" data-tab="set">⚙️ Настройки</button>
-        </div>
+        <div id="tabnav" style="width:150px;flex:none;display:flex;flex-direction:column;gap:8px"></div>
         <div id="tabbody" style="flex:1;min-width:0"></div>
       </div>
     </div>`;
   $("a-out").onclick = async () => { await api("/api/logout", {}); boot(); };
+  const defs = [
+    ["chat", "💬 Чат", tabChat],
+    ["term", "⌨️ Терминал", tabTerm],
+  ];
+  if (p.modules.wikipedia) defs.push(["wiki", "📚 Википедия", tabWiki]);
+  if (p.modules.telegram) defs.push(["tg", "✈️ Бот", tabTg]);
+  if (p.modules.analytics) defs.push(["ana", "📊 Аналитика", tabAna]);
+  defs.push(["set", "⚙️ Настройки", tabSet]);
+  $("tabnav").innerHTML = defs.map((d, i) =>
+    '<button class="tabbtn' + (i === 0 ? " sel" : "") + '" data-tab="' + d[0] + '">' + d[1] + "</button>").join("");
+  const routes = Object.fromEntries(defs.map(d => [d[0], d[2]]));
   document.querySelectorAll(".tabbtn").forEach(b => b.onclick = () => {
     document.querySelectorAll(".tabbtn").forEach(x => x.classList.remove("sel"));
     b.classList.add("sel");
-    ({chat: tabChat, term: tabTerm, set: tabSet})[b.dataset.tab](p);
+    routes[b.dataset.tab](p);
   });
-  tabChat(p);
+  routes.chat(p);
 }
 
 function tabChat(p) {
@@ -372,6 +379,68 @@ function tabSet(p) {
     $("s-err").textContent = r.data.ok ? "ключ обновлён" : r.data.error;
     if (r.data.ok) boot();
   };
+}
+
+// ── модули: Википедия / Telegram-бот / Аналитика ──
+function tabWiki(p) {
+  $("tabbody").innerHTML =
+    '<label>Поиск по твоим заметкам</label><div style="display:flex;gap:8px">' +
+    '<input id="wk-q" style="flex:1" placeholder="что ищем?"><button class="primary" id="wk-go">Искать</button></div>' +
+    '<div id="wk-res" style="margin-top:14px"></div>';
+  const doSearch = async () => {
+    const r = await api("/api/wiki/search", {query: $("wk-q").value});
+    const res = r.data.results || [];
+    $("wk-res").innerHTML = res.length ? res.map(h =>
+      '<div class="mod"><div><div class="t">' + h.path + '</div><div class="d">' + h.snippet + '</div></div>' +
+      '<button data-p="' + h.path + '" class="x">выжимка</button></div>').join("") :
+      '<div class="sub">ничего не найдено</div>';
+    $("wk-res").querySelectorAll(".x").forEach(b => b.onclick = () => {
+      const title = prompt("Название выжимки:");
+      if (!title) return;
+      api("/api/wiki/extract", {source_path: b.dataset.p, title: title}).then(r2 => {
+        $("wk-res").insertAdjacentHTML("afterbegin",
+          r2.data.ok ? '<div class="sum">✅ выжимка: ' + r2.data.path + '</div>' :
+          '<div class="err">' + r2.data.error + '</div>');
+      });
+    });
+  };
+  $("wk-go").onclick = doSearch;
+  $("wk-q").onkeydown = e => { if (e.key === "Enter") doSearch(); };
+}
+
+function tabTg(p) {
+  $("tabbody").innerHTML = '<div id="tg-body" class="sub">загружаю статус…</div>';
+  const draw = async () => {
+    const s = (await (await fetch("/api/tg/status")).json());
+    $("tg-body").innerHTML =
+      '<div class="sum">Модуль: <b>' + (s.module ? "вкл" : "выкл") + '</b> · токен: <b>' +
+      (s.configured ? "задан" : "нет") + '</b> · поллер: <b>' + (s.poller ? "работает" : "не запущен") + '</b></div>' +
+      '<label>Токен бота (от @BotFather)</label><input id="tg-token" type="password">' +
+      '<label>Твой chat_id (узнать у @userinfobot)</label><input id="tg-chat" type="text">' +
+      '<div class="row"><span class="sub">после подключения: /note текст — заметка в vault, остальное — чат</span>' +
+      '<button class="primary" id="tg-save">Подключить</button></div><div class="err" id="tg-err"></div>';
+    $("tg-save").onclick = async () => {
+      const r = await api("/api/tg/setup", {token: $("tg-token").value.trim(), chat_id: $("tg-chat").value.trim()});
+      $("tg-err").textContent = r.data.ok ? "✅ подключён бот " + r.data.bot : r.data.error;
+      if (r.data.ok) setTimeout(draw, 800);
+    };
+  };
+  draw();
+}
+
+async function tabAna(p) {
+  $("tabbody").innerHTML = '<div class="sub">считаю…</div>';
+  const r = await api("/api/analytics/summary", {});
+  if (r.data.error) { $("tabbody").innerHTML = '<div class="err">' + r.data.error + '</div>'; return; }
+  const s = r.data;
+  const max = Math.max(1, ...s.by_day.map(d => d[1]));
+  $("tabbody").innerHTML =
+    '<div class="sum">Заметок: <b>' + s.notes + '</b> · слов: <b>' + s.words + '</b> · изменено за 7 дней: <b>' + s.changed_last_7d + '</b></div>' +
+    '<h2 style="margin-top:16px">Топ тегов</h2><div>' +
+    (s.top_tags.map(t => '<span class="chip">' + t[0] + ' · ' + t[1] + '</span>').join("") || '<span class="sub">тегов нет</span>') + '</div>' +
+    '<h2 style="margin-top:16px">Активность по дням</h2><div>' +
+    s.by_day.map(d => '<div class="row"><span class="sub">' + d[0] + '</span><span style="flex:1;margin:0 10px;height:6px;background:var(--glass);border-radius:3px"><span style="display:block;height:6px;width:' + (d[1] / max * 100) + '%;background:var(--acc);border-radius:3px"></span></span><b>' + d[1] + '</b></div>').join("") +
+    '</div><div class="warn" style="margin-top:16px">Аналитика видит только твой vault. Использование для слежки за людьми — запрещено.</div>';
 }
 
 async function boot() {

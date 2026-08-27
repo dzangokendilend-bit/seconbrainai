@@ -3,6 +3,7 @@ import base64
 import json
 import os
 import sys
+import time
 import urllib.parse
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,6 +15,8 @@ import keys as keys_mod
 import onboarding
 import providers
 import terminal as term
+import modules as mon_mods
+import tgbot
 
 COOKIE = "monica_session"
 MODEL_SERVICE = {"glm-5.3-fast": "glm", "smart": "smart", "gpt-5.6-luna": "luna"}
@@ -311,6 +314,73 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"results": term.execute(vault, clean)})
             return
 
+        if path == "/api/wiki/search":
+            p = auth.load_profile(uid)
+            if not p.get("modules", {}).get("wikipedia"):
+                self._json({"error": "модуль Википедия выключен"}, 403)
+                return
+            vault = os.path.join(auth.user_dir(uid), "vault")
+            self._json({"results": mon_mods.search(vault, body.get("query", ""))})
+            return
+
+        if path == "/api/wiki/extract":
+            p = auth.load_profile(uid)
+            if not p.get("modules", {}).get("wikipedia"):
+                self._json({"error": "модуль Википедия выключен"}, 403)
+                return
+            title = re.sub(r"[^\w\d -]", "", body.get("title") or "").strip()[:80]
+            if not title:
+                self._json({"error": "укажи название выжимки"}, 400)
+                return
+            vault = os.path.join(auth.user_dir(uid), "vault")
+            src, rel = term.safe_path(vault, body.get("source_path"))
+            with open(src, encoding="utf-8", errors="replace") as f:
+                src_text = f.read()
+            ex_dir = os.path.join(vault, "Выжимки")
+            os.makedirs(ex_dir, exist_ok=True)
+            out = os.path.join(ex_dir, title + ".md")
+            with open(out, "w", encoding="utf-8", newline="\n") as f:
+                f.write("---\ntitle: Выжимка — " + title + "\ntags: [extract]\n"
+                        "source: " + rel + "\ncreated: " + time.strftime("%Y-%m-%d")
+                        + "\n---\n\n# Выжимка — " + title + "\n\nИсточник: [[" + rel + "]]\n\n"
+                        + src_text[:3000] + "\n")
+            self._json({"ok": True, "path": "Выжимки/" + title + ".md"})
+            return
+        if path == "/api/analytics/summary":
+            p = auth.load_profile(uid)
+            if not p.get("modules", {}).get("analytics"):
+                self._json({"error": "модуль Полная аналитика выключен"}, 403)
+                return
+            vault = os.path.join(auth.user_dir(uid), "vault")
+            self._json(mon_mods.summary(vault))
+            return
+
+        if path == "/api/tg/setup":
+            token = (body.get("token") or "").strip()
+            chat_id = str(body.get("chat_id") or "").strip()
+            if len(token) < 20 or not chat_id:
+                self._json({"error": "нужны token бота и твой chat_id"}, 400)
+                return
+            try:
+                me_bot = tgbot._api(token, "getMe")
+            except Exception as e:
+                self._json({"error": "токен не работает: " + str(e)[:120]}, 400)
+                return
+            tgbot.save_cfg(uid, token, chat_id)
+            p = auth.load_profile(uid)
+            if p.get("modules", {}).get("telegram"):
+                tgbot.start(uid)
+            self._json({"ok": True, "bot": "@" + str(me_bot.get("result", {}).get("username", "?"))})
+            return
+
+        if path == "/api/tg/status":
+            p = auth.load_profile(uid)
+            cfgv = tgbot.load_cfg(uid)
+            self._json({"configured": bool(cfgv.get("token")),
+                        "poller": tgbot.running(uid),
+                        "module": bool(p.get("modules", {}).get("telegram"))})
+            return
+
         self._json({"error": "неизвестный маршрут"}, 404)
 
 
@@ -326,7 +396,8 @@ class Server(ThreadingHTTPServer):
 
 if __name__ == "__main__":
     with Server((config.HOST, config.PORT), Handler) as httpd:
-        print(f"Monica 1.0 (phase 1) -> http://{config.HOST}:{config.PORT}")
+        tgbot.start_all()
+        print(f"Monica 1.0 (phase 3) -> http://{config.HOST}:{config.PORT}")
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
