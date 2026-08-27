@@ -115,10 +115,22 @@ function renderWizard() {
   fetch("/api/models").then(r => r.json()).then(c => { CFGM = c; renderW(); });
 }
 
+/* Фаза 5-C: SVG-глиф у заголовка каждого шага (stroke-стиль chat.html) */
+const WGLYPH = {
+  2: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3c-1.4 0-2.7-.3-3.9-.9L3 20l1.2-4.3a8.1 8.1 0 0 1-1.2-4.2A8.4 8.4 0 0 1 11.5 3.2a8.4 8.4 0 0 1 9.5 8.3z"/><path d="M9.5 9.5a2.5 2.5 0 0 1 4.9.8c0 1.6-2.4 2-2.4 3.2"/><circle cx="12" cy="16.6" r=".4"/></svg>',
+  3: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.4-3.4 4.4-5 8-5s6.6 1.6 8 5"/></svg>',
+  4: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg>',
+  5: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg>',
+  6: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4.5"/><path d="M11.2 11.8 20 3M15.5 7.5l3 3M18 5l2.5 2.5"/></svg>',
+  7: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.5"/></svg>'
+};
+
 function wHead(title) {
+  /* Фаза 5-C: глиф-бейдж над заголовком шага (стиль .wglyph из monica.css) */
+  const g = WGLYPH[W.step] ? '<div class="wglyph">' + WGLYPH[W.step] + "</div>" : "";
   return '<div class="mstep">Шаг ' + W.step + " из 7</div>" +
     '<div class="mbar"><i style="width:' + (W.step / 7 * 100) + '%"></i></div>' +
-    '<div class="mtitle">' + title + "</div>";
+    g + '<div class="mtitle">' + title + "</div>";
 }
 function wNav() {
   return '<div class="err" id="w-err"></div><div class="row">' +
@@ -139,11 +151,23 @@ function wBind(next) {
 function renderW() {
   const wz = $("wz");
   if (W.step === 1) {
-    wz.innerHTML = wHead("Привет! Это Моника") +
-      '<p>Твоё личное ИИ-пространство: заметки, чат, модули и терминал — в одном спокойном месте.</p>' +
-      '<p>За 7 коротких шагов соберём аккаунт: расскажешь, откуда ты, как будешь пользоваться, выберешь модули и подключишь ключи моделей.</p>' +
-      '<p class="sub">Пара минут. Всё можно поменять потом в настройках.</p>' + wNav();
-    wBind(async () => null);
+    /* Фаза 5-C: полноэкранный герой как у логина (глобус + сериф + закрытая бета) */
+    wz.innerHTML =
+      '<div class="whero">' +
+      '<div class="login-brand"><svg class="globe" viewBox="0 0 64 64" aria-hidden="true">' +
+      '<defs><clipPath id="wc"><circle cx="32" cy="32" r="27"/></clipPath></defs>' +
+      '<circle cx="32" cy="32" r="27" class="g-fill"/>' +
+      '<g clip-path="url(#wc)" class="g-line"><circle cx="32" cy="32" r="27"/>' +
+      '<ellipse cx="32" cy="32" rx="10" ry="27"/><ellipse cx="32" cy="32" rx="19" ry="27"/>' +
+      '<line x1="5" y1="32" x2="59" y2="32"/><line x1="9" y1="18" x2="55" y2="18"/>' +
+      '<line x1="9" y1="46" x2="55" y2="46"/></g>' +
+      '<g class="g-type"><text x="32" y="40" text-anchor="middle">М</text></g></svg></div>' +
+      "<h2>Привет! Это Моника</h2>" +
+      "<p>Твоё личное ИИ-пространство: заметки, чат, модули и терминал — в одном спокойном месте.</p>" +
+      '<p class="sub">За 7 коротких шагов соберём аккаунт: расскажешь, откуда ты, как будешь пользоваться, выберешь модули и подключишь ключи моделей.</p>' +
+      '<span class="beta-tag">🔒 закрытое тестирование · доступ для друзей и бета-тестеров</span>' +
+      '<button class="mbtn acc" id="w-next">Начать →</button></div>';
+    $("w-next").onclick = () => { W.step = 2; renderW(); };
   } else if (W.step === 2) {
     wz.innerHTML = wHead("Пара вопросов") +
       '<label>Откуда вы узнали о нас?</label><div id="w-src"></div>' +
@@ -251,6 +275,10 @@ function renderW() {
       return r.data.error || "ошибка сохранения";
     });
   }
+  /* Фаза 5-C: плавный переход между шагами (slide+fade) */
+  wz.classList.remove("wz-in");
+  void wz.offsetWidth;
+  wz.classList.add("wz-in");
 }
 
 /* ── каркас приложения (скелет chat.html) ── */

@@ -48,6 +48,24 @@ const consoleErrors = [], badResponses = [];
   ok("логин: поля в пилюльном стиле (radius " + br + ")", parseFloat(br) >= 20);
   await page.screenshot({path: path.join(__dirname, "ui_login.png")});
 
+  /* 1b. онбординг: герой + анимация шагов (Фаза 5-C) */
+  await page.click("#l-reg");
+  await page.waitForSelector("#scr-wizard:not(.hidden)", {timeout: 5000}).catch(() => {});
+  /* renderW срабатывает после fetch /api/models — ждём именно герой */
+  await page.waitForSelector("#scr-wizard .whero", {timeout: 5000}).catch(() => {});
+  ok("онбординг: герой-экран показан", await page.$("#scr-wizard .whero"));
+  ok("онбординг: глобус в герое", await page.$(".whero .globe"));
+  ok("онбординг: метка закрытой беты", await page.$(".whero .beta-tag"));
+  ok("онбординг: кнопка «Начать»", await page.$(".whero #w-next"));
+  ok("онбординг: анимация шага (.wz-in)",
+    await page.$eval("#wz", el => el.classList.contains("wz-in")).catch(() => false));
+  await page.click(".whero #w-next");
+  await new Promise(r => setTimeout(r, 400));
+  ok("онбординг: шаг 2 — глиф и прогресс-бар",
+    (await page.$("#wz .wglyph")) && (await page.$("#wz .mbar")));
+  await page.goto(BASE, {waitUntil: "networkidle0", timeout: 15000});
+  await page.waitForSelector("#l-user", {visible: true, timeout: 5000}).catch(() => {});
+
   /* 2. вход и каркас */
   await page.click("#l-user"); await page.type("#l-user", USER);
   await page.click("#l-pass"); await page.type("#l-pass", PASS);
