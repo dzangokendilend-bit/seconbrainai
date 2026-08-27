@@ -92,12 +92,17 @@ const STEPS = {
       const box = set === "source" ? $("w-src") : $("w-purpose");
       box.innerHTML = arr.map(x => '<span class="chip' + (cur === x ? " sel" : "") + '" data-x="' + x + '">' + x + "</span>").join("");
       box.querySelectorAll(".chip").forEach(c => c.onclick = () => {
-        if (set === "source") W.source = c.dataset.x; else W.purpose = c.dataset.x;
+        if (set === "source") {
+          W.source = c.dataset.x;
+        } else {
+          // цель опциональна: повторный клик по выбранной снимает выбор
+          W.purpose = (W.purpose === c.dataset.x) ? "" : c.dataset.x;
+        }
         STEPS[2]();
       });
     };
     chips(CFG.sources, W.source, "source");
-    chips([""].concat(CFG.purposes), W.purpose, "purpose");
+    chips(CFG.purposes, W.purpose, "purpose");
     bindNav(async () => W.source ? null : "выбери, откуда ты о нас узнал(а)");
   },
 
