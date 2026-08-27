@@ -265,7 +265,7 @@ function renderShell() {
   });
   const p = ME;
   $("cs-prof").innerHTML =
-    '<div class="prof">' + (p.avatar ? '<img src="' + p.avatar + '">' : '<div class="pa">' + esc(p.username[0].toUpperCase()) + '</div>') +
+    '<div class="prof">' + (p.avatar ? '<img src="' + p.avatar + '">' : '<div class="pa">' + esc(((p.username || "?")[0]) || "?").toUpperCase() + '</div>') +
     '<div><div class="un">' + esc(p.username) + '</div><div class="mdl">' + esc((p.onboarding.prefs || {}).model || "") + '</div></div></div>' +
     '<div class="sum" style="padding:0 6px 8px">реплик в сессии: <b id="pf-cnt">0</b></div>';
   $("cs-logout").onclick = async () => { await api("/api/logout", {}); location.reload(); };
@@ -559,8 +559,12 @@ function tabSet(p) {
 async function boot() {
   dotsInit();
   const me = await (await fetch("/api/me")).json();
-  if (me.state === "app") { ME = me; renderShell(); }
-  else renderLogin();
+  if (me.state === "app") {
+    // ВАЖНО: храним именно профиль (username/keys_masked внутри него),
+    // а не весь ответ — иначе renderShell читает undefined (баг 27.08).
+    ME = me.profile || me;
+    renderShell();
+  } else renderLogin();
 }
 
 boot();
