@@ -31,7 +31,8 @@ def search(vault, query, limit=10):
         if score <= 0:
             continue
         rel = os.path.relpath(path, vault).replace(os.sep, "/")
-        pos = max(low.find(t) for t in terms if t in low)
+        positions = [low.find(t) for t in terms if t in low]
+        pos = max(positions) if positions else 0
         snippet = text[max(0, pos - 60):pos + 120].replace(chr(10), " ").strip()
         hits.append({"path": rel, "score": score, "snippet": "…" + snippet + "…"})
     hits.sort(key=lambda h: -h["score"])
