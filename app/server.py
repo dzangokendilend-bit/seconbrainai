@@ -121,7 +121,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_error(404)
 
-    def _serve_file(self, name, ctype):
+    def _serve_file(self, name, ctype=None):
+        # Браузеры блокируют CSS с не-CSS MIME — карта обязательна
+        # (баг 27.08: theme.css уезжал как text/plain и тема не применялась).
+        ext_map = {".css": "text/css; charset=utf-8",
+                   ".js": "application/javascript",
+                   ".html": "text/html; charset=utf-8",
+                   ".png": "image/png", ".jpg": "image/jpeg",
+                   ".svg": "image/svg+xml", ".ico": "image/x-icon"}
+        ext = os.path.splitext(name)[1].lower()
+        ctype = ext_map.get(ext, ctype or "application/octet-stream")
         fp = os.path.join(config.WEB_DIR, name)
         if not os.path.exists(fp):
             self.send_error(404)
