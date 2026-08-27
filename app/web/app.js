@@ -288,8 +288,9 @@ function renderShell() {
   openTab("chat");
 }
 
-/* typewriter-заголовок: только для вкладки чата, остальные — статика */
-const PHRASES = ["Чат с Моникой", "С чего начнём?", "О чём поговорим?", "Что разберём?", "Слушаю тебя"];
+/* typewriter 2.0: «дыхание» интерфейса — джиттер набора, быстрое стирание,
+   длинная пауза на прочтение, CSS-каретка, фейд новой фразы. Только чат. */
+const PHRASES = ["Чат с Моникой", "С чего начнём?", "О чём поговорим?", "Что разберём сегодня?"];
 let TW_TIMER = null;
 function setTitleTab(tab) {
   if (TW_TIMER) { clearInterval(TW_TIMER); clearTimeout(TW_TIMER); TW_TIMER = null; }
@@ -299,18 +300,19 @@ function setTitleTab(tab) {
   const cycle = () => {
     if (TAB !== "chat") return;
     const t = PHRASES[pi % PHRASES.length]; pi++;
+    el.classList.remove("tw"); void el.offsetWidth; el.classList.add("tw");
     let k = 0, del = false;
     const step = () => {
       if (TAB !== "chat") { clearInterval(TW_TIMER); TW_TIMER = null; return; }
-      el.textContent = t.slice(0, k) + (k < t.length || del ? "▎" : "");
+      el.innerHTML = esc(t.slice(0, k)) + '<span class="caret"></span>';
       if (!del) {
         k++;
-        if (k > t.length) { del = true; TW_TIMER = setTimeout(cycle, 2400); return; }
-        TW_TIMER = setTimeout(step, 70);
+        if (k > t.length) { del = true; TW_TIMER = setTimeout(cycle, 2800); return; }
+        TW_TIMER = setTimeout(step, 62 + Math.random() * 36);
       } else {
-        k--;
-        if (k <= 0) { TW_TIMER = setTimeout(cycle, 400); return; }
-        TW_TIMER = setTimeout(step, 32);
+        k -= 2;
+        if (k <= 0) { TW_TIMER = setTimeout(cycle, 420); return; }
+        TW_TIMER = setTimeout(step, 26);
       }
     };
     step();
@@ -346,14 +348,14 @@ function tabChat(p) {
     "</div></form>" +
     '<div class="cs-actions"><span id="cs-status" class="cs-status"></span></div></div>';
   const form = $("chat-form"), input = $("chat-input"), log = $("chat-log");
+  const mdl = (p.onboarding.prefs || {}).model || "?";
+  $("cs-status").innerHTML = '<span class="mdl-chip">отвечаю на «' + esc(mdl) + "»</span>";
   const resize = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px"; };
   input.addEventListener("input", resize);
   input.addEventListener("keydown", e => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
   });
   form.onsubmit = e => { e.preventDefault(); const t = input.value.trim(); if (!t) return; input.value = ""; resize(); chatTurn(t); };
-  addBotMsg("Привет, " + p.username + "! Я Моника. Отвечаю на модели «" +
-    ((p.onboarding.prefs || {}).model || "?") + "». О чём думаем?", {keepEmpty: true});
 }
 
 function hideEmpty() {

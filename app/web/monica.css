@@ -98,16 +98,14 @@ select.minput{border-radius:var(--r-sm)}
   border-left-color:rgba(255,255,255,.14);opacity:0;transition:.16s;pointer-events:none}
 .cs-term:hover::after,.cs-term:hover::before{opacity:1;transform:translateY(-50%) translateX(0)}
 
-/* баннер закрытого тестирования (пустой чат) */
+/* баннер закрытого тестирования (пустой чат) — hatnote.amber из Иванопедии */
 .cs-empty{align-items:center;text-align:center;top:24%;gap:18px;transition:.3s}
-.beta{max-width:480px;width:88%;text-align:left;position:relative;
-  padding:18px 22px 16px 26px;border:1px solid var(--border);border-radius:var(--r-panel);
-  background:var(--infobox);backdrop-filter:var(--blur);box-shadow:var(--shadow-panel)}
-.beta::before{content:'';position:absolute;left:0;top:14px;bottom:14px;width:3px;
-  border-radius:2px;background:linear-gradient(180deg,rgba(201,150,63,.9),rgba(201,150,63,.25))}
-.beta h3{margin:0 0 8px;font-family:var(--ui);font-size:15px;font-weight:500;color:var(--text)}
+.beta{max-width:480px;width:88%;text-align:left;
+  padding:12px 15px;border-left:3px solid #d0a04a;border-radius:0 10px 10px 0;
+  background:rgba(201,150,63,.10);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.beta h3{margin:0 0 6px;font-family:var(--sans);font-size:13.5px;font-weight:500;color:var(--text)}
 .beta h3 i{font-style:normal;margin-right:7px}
-.beta p{margin:0 0 6px;font-size:13px;line-height:1.55;color:var(--muted)}
+.beta p{margin:0 0 6px;font-family:var(--sans);font-size:13px;line-height:1.55;color:#cfd4da}
 .beta p:last-child{margin-bottom:0}
 
 /* активная вкладка: акцентная полоска слева */
@@ -128,3 +126,48 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 .cs-att svg{width:17px;height:17px}
 .cs-att:hover{opacity:.55;background:rgba(255,255,255,.06)}
 .cs-send svg{width:17px;height:17px}
+
+/* ── виток A: typewriter 2.0 ── */
+#m-title{position:relative;min-height:1.2em}
+#m-title .caret{display:inline-block;width:2px;height:.95em;margin-left:3px;
+  background:var(--link);vertical-align:-.08em;animation:caret 1s steps(1) infinite}
+@keyframes caret{0%,55%{opacity:1}56%,100%{opacity:0}}
+#m-title.tw{animation:twfade .45s ease}
+@keyframes twfade{from{opacity:.25}to{opacity:1}}
+@media (prefers-reduced-motion: reduce){#m-title .caret{animation:none}#m-title.tw{animation:none}}
+
+/* ── виток C: онбординг — переход шагов и герой ── */
+.wz-in{animation:wzin .32s ease}
+@keyframes wzin{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){.wz-in{animation:none}}
+.whero{display:flex;flex-direction:column;align-items:center;text-align:center;padding:22px 6px 8px}
+.whero h2{font-family:var(--serif);font-size:29px;margin:0 0 10px}
+.whero p{max-width:420px;margin:0 0 6px}
+.whero .beta-tag{display:inline-flex;align-items:center;gap:7px;margin-top:10px;
+  padding:4px 14px;border-radius:0 8px 8px 0;border-left:3px solid #d0a04a;
+  background:rgba(201,150,63,.10);font-size:12.5px;color:#cfd4da}
+.whero .mbtn{margin-top:18px;padding:10px 34px}
+.wglyph{width:42px;height:42px;border-radius:50%;border:1px solid var(--border);
+  background:var(--glass);display:flex;align-items:center;justify-content:center;
+  margin-bottom:12px}
+.wglyph svg{width:20px;height:20px;color:var(--link)}
+.mhint{font-size:11.5px;color:var(--muted);margin:-8px 0 10px}
+
+/* ── виток B: переключатель модели в шапке чата ── */
+.cs-modelwrap{position:relative;flex:none}
+.cs-modelbtn{display:inline-flex;align-items:center;gap:7px;padding:5px 14px;
+  border-radius:var(--r-pill);border:1px solid var(--border);background:var(--glass);
+  color:var(--muted);font-family:var(--ui);font-size:12px;cursor:pointer;transition:.15s}
+.cs-modelbtn:hover{color:var(--text);border-color:rgba(255,255,255,.3)}
+.cs-modelbtn .dot{width:6px;height:6px;border-radius:50%;background:var(--acc);
+  box-shadow:0 0 6px rgba(143,180,255,.6)}
+.cs-modelmenu{position:absolute;top:calc(100% + 8px);right:0;z-index:40;min-width:270px;
+  background:rgba(14,14,17,.96);border:1px solid var(--border);border-radius:15px;
+  box-shadow:var(--shadow-panel);padding:6px;display:none}
+.cs-modelmenu.open{display:block;animation:wzin .2s ease}
+.cs-modelmenu button{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;
+  padding:9px 12px;border:none;border-radius:10px;background:none;color:var(--text);
+  font-family:var(--ui);font-size:13px;cursor:pointer}
+.cs-modelmenu button:hover{background:rgba(255,255,255,.07)}
+.cs-modelmenu button.sel{background:rgba(143,180,255,.10)}
+.cs-modelmenu button .d{font-size:11px;color:var(--muted)}

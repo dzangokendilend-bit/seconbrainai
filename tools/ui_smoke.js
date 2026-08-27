@@ -79,6 +79,12 @@ const consoleErrors = [], badResponses = [];
   await tab("chat", ".beta", "баннер закрытой беты");
   const title = await page.$eval("#m-title", el => el.textContent).catch(() => "");
   ok("чат: typewriter-заголовок печатается («" + title + "\u2026»)", title.length > 0);
+  ok("чат: CSS-каретка typewriter", await page.$("#m-title .caret"));
+  const bstyle = await page.$eval(".beta", el => getComputedStyle(el).borderLeftColor).catch(() => "");
+  ok("чат: баннер — hatnote.amber Иванопедии (" + bstyle + ")", bstyle === "rgb(208, 160, 74)");
+  const greet = await page.$eval("#chat-log", el => el.textContent).catch(() => "");
+  ok("чат: фиксированного приветствия нет", !/Привет, .+! Я Моника/.test(greet));
+  ok("чат: модель видна в статусе композера", await page.$("#cs-status .mdl-chip"));
   await page.screenshot({path: path.join(__dirname, "ui_last.png")});
 
   ok("нет ошибок JS в консоли", consoleErrors.length === 0);
