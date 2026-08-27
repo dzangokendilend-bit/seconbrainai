@@ -60,10 +60,71 @@ select.minput{border-radius:var(--r-sm)}
 .wl-t{font-family:var(--serif);font-size:17px}
 .wl-s{color:var(--muted);font-size:12.5px;margin:3px 0 8px}
 
-/* профиль в панели истории */
-.prof{display:flex;align-items:center;gap:10px;padding:8px 6px 12px}
-.prof img,.prof .pa{width:40px;height:40px;border-radius:50%;object-fit:cover;
+/* профиль в панели истории — профильная карточка */
+.profcard{display:flex;flex-direction:column;align-items:center;gap:8px;
+  padding:14px 10px 12px;border:1px solid var(--border);border-radius:15px;
+  background:rgba(255,255,255,.035);margin-bottom:10px;position:relative;overflow:hidden}
+.profcard::before{content:'';position:absolute;top:0;left:10%;right:10%;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.28),transparent)}
+.profcard .pa{width:44px;height:44px;border-radius:50%;object-fit:cover;
   border:1px solid var(--border);background:var(--glass);flex:none;
-  display:flex;align-items:center;justify-content:center;font-family:var(--ui);color:#fff}
-.prof .un{font-size:12.5px;color:#fff;word-break:break-all}
-.prof .mdl{font-size:10.5px;color:var(--muted)}
+  display:flex;align-items:center;justify-content:center;font-family:var(--ui);
+  font-size:17px;color:#fff;box-shadow:0 0 14px rgba(143,180,255,.15)}
+.profcard .un{font-size:13px;color:#fff;word-break:break-all;font-weight:500}
+.profcard .mdl{display:inline-flex;align-items:center;gap:5px;padding:2px 10px;
+  border-radius:var(--r-pill);border:1px solid var(--border);
+  background:var(--glass);font-size:10.5px;color:var(--muted)}
+.profcard .st{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.profcard .st i{width:6px;height:6px;border-radius:50%;background:#6be08a;
+  box-shadow:0 0 6px rgba(107,224,138,.7)}
+.profcard .cnt{font-size:11px;color:var(--muted)}
+.profcard .cnt b{color:var(--text);font-weight:500}
+
+/* ── виток полировки ── */
+/* поля логина — пилюли PIN-гейта */
+.login-hero .l-input{width:300px;margin:5px 0;text-align:center;
+  background:rgba(0,0,0,.25);padding:12px 18px}
+.login-hero .l-input:focus{border-color:rgba(255,255,255,.45);box-shadow:0 0 0 3px rgba(143,180,255,.08)}
+
+/* кастомные тултипы для левых кнопок */
+.cs-term{position:relative}
+.cs-term::after{content:attr(data-tip);position:absolute;right:56px;top:50%;
+  transform:translateY(-50%) translateX(6px);white-space:nowrap;
+  padding:6px 13px;border-radius:var(--r-pill);border:1px solid var(--border);
+  background:rgba(14,14,17,.92);backdrop-filter:var(--blur);color:var(--text);
+  font-family:var(--ui);font-size:12px;opacity:0;pointer-events:none;transition:.16s}
+.cs-term::before{content:'';position:absolute;right:50px;top:50%;
+  transform:translateY(-50%) translateX(6px);border:5px solid transparent;
+  border-left-color:rgba(255,255,255,.14);opacity:0;transition:.16s;pointer-events:none}
+.cs-term:hover::after,.cs-term:hover::before{opacity:1;transform:translateY(-50%) translateX(0)}
+
+/* баннер закрытого тестирования (пустой чат) */
+.cs-empty{align-items:center;text-align:center;top:24%;gap:18px;transition:.3s}
+.beta{max-width:480px;width:88%;text-align:left;position:relative;
+  padding:18px 22px 16px 26px;border:1px solid var(--border);border-radius:var(--r-panel);
+  background:var(--infobox);backdrop-filter:var(--blur);box-shadow:var(--shadow-panel)}
+.beta::before{content:'';position:absolute;left:0;top:14px;bottom:14px;width:3px;
+  border-radius:2px;background:linear-gradient(180deg,rgba(201,150,63,.9),rgba(201,150,63,.25))}
+.beta h3{margin:0 0 8px;font-family:var(--ui);font-size:15px;font-weight:500;color:var(--text)}
+.beta h3 i{font-style:normal;margin-right:7px}
+.beta p{margin:0 0 6px;font-size:13px;line-height:1.55;color:var(--muted)}
+.beta p:last-child{margin-bottom:0}
+
+/* активная вкладка: акцентная полоска слева */
+/* navitem — это <button> (в Сибериаде был <a>), сбрасываем браузерный светлый фон */
+button.cs-navitem{background:transparent;border:1px solid transparent;cursor:pointer;
+  width:100%;font-family:var(--ui)}
+button.cs-navitem:hover{background:rgba(255,255,255,.07)}
+.cs-navitem{border:1px solid transparent}
+.cs-navitem.on{border-color:rgba(255,255,255,.14)}
+.cs-navitem.on .cs-ico{position:relative}
+.cs-navitem.on .cs-ico::before{content:'';position:absolute;left:-10px;top:6px;bottom:6px;
+  width:2px;border-radius:1px;background:var(--link);box-shadow:0 0 8px rgba(143,180,255,.6)}
+
+/* композер: шире, аккуратнее, слоты вложений */
+.cs-bottom{width:100%;max-width:780px;margin:0 auto}
+.cs-att{flex:none;width:34px;height:34px;display:flex;align-items:center;justify-content:center;
+  border-radius:50%;color:#fff;opacity:.35;cursor:default;transition:.15s}
+.cs-att svg{width:17px;height:17px}
+.cs-att:hover{opacity:.55;background:rgba(255,255,255,.06)}
+.cs-send svg{width:17px;height:17px}

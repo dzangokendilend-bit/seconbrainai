@@ -241,13 +241,23 @@ function renderW() {
 }
 
 /* ── каркас приложения (скелет chat.html) ── */
+/* SVG-иконки — в стиле stroke-иконок chat.html Сибериады */
+const ICO = {
+  chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3c-1.4 0-2.7-.3-3.9-.9L3 20l1.2-4.3a8.1 8.1 0 0 1-1.2-4.2A8.4 8.4 0 0 1 11.5 3.2a8.4 8.4 0 0 1 9.5 8.3z"/><path d="M8.5 10.5h7M8.5 13.5h4.5"/></svg>',
+  term: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>',
+  wiki: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/><path d="M9 7h7M9 10.5h5"/></svg>',
+  tg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2 15 22l-4-9-9-4 20-7z"/></svg>',
+  ana: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 21h18"/><path d="M6 17V9M11 17V5M16 17v-6M21 17v-3" transform="translate(-1.5 0)"/></svg>',
+  set: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M21 12h-2.5M5.5 12H3M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8M18.4 18.4l-1.8-1.8M7.4 7.4L5.6 5.6"/></svg>',
+};
+const SEND_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M12 5.5 18.5 12 12 18.5"/></svg>';
 const NAV = [
-  ["chat", "💬", "Чат"],
-  ["term", "⌨️", "Терминал"],
-  ["wiki", "📚", "Википедия"],
-  ["tg", "✈️", "Бот"],
-  ["ana", "📊", "Аналитика"],
-  ["set", "⚙️", "Настройки"],
+  ["chat", "Чат"],
+  ["term", "Терминал"],
+  ["wiki", "Википедия"],
+  ["tg", "Бот"],
+  ["ana", "Аналитика"],
+  ["set", "Настройки"],
 ];
 const TITLES = {chat: "Чат с Моникой", term: "Терминал", wiki: "Википедия",
   tg: "Telegram-бот", ana: "Полная аналитика", set: "Настройки"};
@@ -257,7 +267,7 @@ function renderShell() {
   show("scr-app");
   $("cs-nav").innerHTML = NAV.map((n, i) =>
     '<button class="cs-navitem' + (i === 0 ? " on" : "") + '" data-tab="' + n[0] + '">' +
-    '<span class="cs-ico">' + n[1] + "</span><span>" + n[2] + "</span></button>").join("");
+    '<span class="cs-ico">' + ICO[n[0]] + "</span><span>" + n[1] + "</span></button>").join("");
   $("cs-nav").querySelectorAll(".cs-navitem").forEach(b => b.onclick = () => {
     document.querySelectorAll(".cs-navitem").forEach(x => x.classList.remove("on"));
     b.classList.add("on");
@@ -265,18 +275,52 @@ function renderShell() {
   });
   const p = ME;
   $("cs-prof").innerHTML =
-    '<div class="prof">' + (p.avatar ? '<img src="' + p.avatar + '">' : '<div class="pa">' + esc(((p.username || "?")[0]) || "?").toUpperCase() + '</div>') +
-    '<div><div class="un">' + esc(p.username) + '</div><div class="mdl">' + esc((p.onboarding.prefs || {}).model || "") + '</div></div></div>' +
-    '<div class="sum" style="padding:0 6px 8px">реплик в сессии: <b id="pf-cnt">0</b></div>';
+    '<div class="profcard">' +
+    (p.avatar ? '<img class="pa" src="' + p.avatar + '">' : '<div class="pa">' + esc(((p.username || "?")[0]) || "?").toUpperCase() + "</div>") +
+    '<div class="un">' + esc(p.username) + "</div>" +
+    '<div class="mdl">' + esc((p.onboarding.prefs || {}).model || "") + "</div>" +
+    '<div class="st"><i></i>онлайн</div>' +
+    '<div class="cnt">реплик в сессии: <b id="pf-cnt">0</b></div>' +
+    "</div>";
   $("cs-logout").onclick = async () => { await api("/api/logout", {}); location.reload(); };
   $("cs-gear").onclick = () => openTab("set");
-  $("cs-refresh").onclick = () => location.reload();
+  $("cs-refresh").onclick = () => openTab(TAB); // перерисовка вкладки без перезагрузки страницы
   openTab("chat");
+}
+
+/* typewriter-заголовок: только для вкладки чата, остальные — статика */
+const PHRASES = ["Чат с Моникой", "С чего начнём?", "О чём поговорим?", "Что разберём?", "Слушаю тебя"];
+let TW_TIMER = null;
+function setTitleTab(tab) {
+  if (TW_TIMER) { clearInterval(TW_TIMER); clearTimeout(TW_TIMER); TW_TIMER = null; }
+  const el = $("m-title");
+  if (tab !== "chat") { el.textContent = TITLES[tab] || tab; return; }
+  let pi = 0;
+  const cycle = () => {
+    if (TAB !== "chat") return;
+    const t = PHRASES[pi % PHRASES.length]; pi++;
+    let k = 0, del = false;
+    const step = () => {
+      if (TAB !== "chat") { clearInterval(TW_TIMER); TW_TIMER = null; return; }
+      el.textContent = t.slice(0, k) + (k < t.length || del ? "▎" : "");
+      if (!del) {
+        k++;
+        if (k > t.length) { del = true; TW_TIMER = setTimeout(cycle, 2400); return; }
+        TW_TIMER = setTimeout(step, 70);
+      } else {
+        k--;
+        if (k <= 0) { TW_TIMER = setTimeout(cycle, 400); return; }
+        TW_TIMER = setTimeout(step, 32);
+      }
+    };
+    step();
+  };
+  cycle();
 }
 
 function openTab(tab) {
   TAB = tab;
-  $("m-title").textContent = TITLES[tab] || tab;
+  setTitleTab(tab);
   $("m-sub").textContent = new Date().toLocaleDateString("ru-RU", {day: "numeric", month: "long", weekday: "long"});
   ({chat: tabChat, term: tabTerm, wiki: tabWiki, tg: tabTg, ana: tabAna, set: tabSet})[tab](ME);
 }
@@ -291,11 +335,14 @@ function tabChat(p) {
   $("m-body").innerHTML =
     '<div id="chat-log" class="cs-log"></div>' +
     '<div id="cs-empty" class="cs-empty"><div class="cs-empty-t">С чего начнём?</div>' +
-    '<div class="cs-empty-grid">' + SUGGESTIONS.map(s =>
-      '<button type="button" class="cs-sug">' + s + "</button>").join("") + "</div></div>" +
+    '<div class="beta"><h3><i>🔒</i>Закрытое тестирование</h3>' +
+    "<p>Моника — закрытая бета для друзей и бета-тестеров. Часть функций ещё в разработке, возможны странности в работе.</p>" +
+    "<p>Твои заметки и данные принадлежат только тебе. Нашёл баг или есть идея — расскажи автору.</p></div></div>" +
     '<div class="cs-bottom"><form id="chat-form"><div class="cs-inputbar">' +
+    '<span class="cs-att" title="скоро: изображения"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M21 15.5 16.5 11 7 19"/></svg></span>' +
+    '<span class="cs-att" title="скоро: файлы"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.05 12.25 20.2a5.5 5.5 0 0 1-7.78-7.78l8.49-8.48a3.67 3.67 0 0 1 5.18 5.18l-8.48 8.49a1.83 1.83 0 0 1-2.6-2.6l7.79-7.78"/></svg></span>' +
     '<textarea id="chat-input" rows="1" placeholder="напиши Монике…"></textarea>' +
-    '<button type="submit" class="cs-send" title="Отправить">➤</button>' +
+    '<button type="submit" class="cs-send" title="Отправить">' + SEND_SVG + "</button>" +
     "</div></form>" +
     '<div class="cs-actions"><span id="cs-status" class="cs-status"></span></div></div>';
   const form = $("chat-form"), input = $("chat-input"), log = $("chat-log");
@@ -305,9 +352,8 @@ function tabChat(p) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
   });
   form.onsubmit = e => { e.preventDefault(); const t = input.value.trim(); if (!t) return; input.value = ""; resize(); chatTurn(t); };
-  document.querySelectorAll(".cs-sug").forEach(b => b.onclick = () => chatTurn(b.textContent));
   addBotMsg("Привет, " + p.username + "! Я Моника. Отвечаю на модели «" +
-    ((p.onboarding.prefs || {}).model || "?") + "». О чём думаем?");
+    ((p.onboarding.prefs || {}).model || "?") + "». О чём думаем?", {keepEmpty: true});
 }
 
 function hideEmpty() {
@@ -315,8 +361,10 @@ function hideEmpty() {
   if (e) e.classList.add("off");
 }
 
-function addMsg(role, text) {
-  hideEmpty();
+function addBotMsg(text, opts) { return addMsg("bot", text, opts); }
+
+function addMsg(role, text, opts) {
+  if (!opts || !opts.keepEmpty) hideEmpty();
   const d = document.createElement("div");
   d.className = "chat-msg " + role;
   d.textContent = text;
@@ -386,7 +434,7 @@ function tabTerm(p) {
     '<div id="tlog" class="cs-log"></div>' +
     '<div class="cs-bottom"><form id="tform"><div class="cs-inputbar">' +
     '<textarea id="t-input" rows="1" placeholder="например: создай заметку идеи/план.md"></textarea>' +
-    '<button type="submit" class="cs-send" title="Отправить">➤</button>' +
+    '<button type="submit" class="cs-send" title="Отправить">' + SEND_SVG + "</button>" +
     "</div></form></div>";
   addTMsg("bot", "Терминал работает только с твоим vault. Изменения — после подтверждения. Ядро Моники и чужие данные недоступны.");
   const form = $("tform"), input = $("t-input");
@@ -468,7 +516,7 @@ function tabWiki(p) {
 function tabTg(p) {
   $("m-body").innerHTML = '<div id="tg-body" class="body"><p>загружаю статус…</p></div>';
   const draw = async () => {
-    const s = await (await fetch("/api/tg/status")).json();
+    const s = await (await api("/api/tg/status", {})).data;
     $("tg-body").innerHTML =
       '<p class="sum">Модуль: <b>' + (s.module ? "вкл" : "выкл") + '</b> · токен: <b>' +
       (s.configured ? "задан" : "нет") + '</b> · поллер: <b>' + (s.poller ? "работает" : "не запущен") + '</b></p>' +

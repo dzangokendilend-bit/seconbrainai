@@ -114,6 +114,9 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             self._serve_file("index.html", "text/html; charset=utf-8")
             return
+        if path == "/favicon.ico":
+            self._serve_file("favicon.svg", "image/svg+xml")
+            return
         if path.startswith("/web/"):
             self._serve_file(path[len("/web/"):])
             return

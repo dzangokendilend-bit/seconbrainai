@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 *.session
 .env
+
+node_modules/
+tools/ui_*.png
