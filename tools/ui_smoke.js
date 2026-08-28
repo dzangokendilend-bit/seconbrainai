@@ -127,6 +127,8 @@ const consoleErrors = [], badResponses = [];
   ok("5-H: вики — список статей в .sgroup", await page.$("#wk-arts .sgroup"));
   ok("5-H: сессии — панель и кнопка новой сессии",
     (await page.$("#cs-sess")) && (await page.$("#sess-new")));
+  ok("6-S: проекты — панель и кнопка создания",
+    (await page.$("#cs-proj")) && (await page.$("#proj-new")));
   await tab("tg", "#tg-body", "статус бота");
   await tab("ana", ".stat-grid", "сводка аналитики");
   await tab("set", ".set-tab.on", "вкладки настроек");

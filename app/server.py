@@ -353,6 +353,10 @@ class Handler(BaseHTTPRequestHandler):
                 if isinstance(m, dict) and m.get("role") in ("user", "assistant"):
                     messages.append({"role": m["role"], "content": str(m.get("content"))[:4000]})
             messages.append({"role": "user", "content": text})
+            # 6-S: общая инструкция проекта (задаётся пользователем в панели проектов)
+            pi = str(body.get("project_instruction") or "")[:500].strip()
+            if pi:
+                messages[0]["content"] += "\n\nКонтекст проекта пользователя: " + pi
             try:
                 reply = providers.chat(service, user_keys[service],
                                        onboarding.api_model(model), messages)
@@ -387,6 +391,10 @@ class Handler(BaseHTTPRequestHandler):
                 if isinstance(m, dict) and m.get("role") in ("user", "assistant"):
                     messages.append({"role": m["role"], "content": str(m.get("content"))[:4000]})
             messages.append({"role": "user", "content": text})
+            # 6-S: общая инструкция проекта
+            pi = str(body.get("project_instruction") or "")[:500].strip()
+            if pi:
+                messages[0]["content"] += "\n\nКонтекст проекта пользователя: " + pi
             api_mdl = onboarding.api_model(model)
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")

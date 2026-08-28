@@ -342,10 +342,120 @@ function sessEnsure() {
     SESS.cur = {id: Date.now(), title: "Новая сессия",
       started: new Date().toISOString(),
       ts: new Date().toLocaleString("ru-RU", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"}),
-      pinned: false, msgs: []};
+      pinned: false, projId: PROJ.filter, msgs: []};
     SESS.list.push(SESS.cur);
   }
   return SESS.cur;
+}
+
+/* ── 6-S: проекты сессий (localStorage; общая инструкция уходит на бэкенд) ── */
+const PROJ_COLORS = ["#8fb4ff", "#b9a3ff", "#d0a04a", "#6be08a", "#e06c75", "#8b96a3"];
+let PROJ = {list: [], filter: null};
+function projKey() { return "monica_proj_" + ((ME && ME.username) || "anon"); }
+function projLoad() {
+  try { PROJ.list = JSON.parse(localStorage.getItem(projKey()) || "[]") || []; }
+  catch (e) { PROJ.list = []; }
+  PROJ.filter = null;
+}
+function projSave() {
+  try { localStorage.setItem(projKey(), JSON.stringify(PROJ.list)); } catch (e) {}
+}
+function projById(id) { return PROJ.list.find(p => p.id === id); }
+function curInstr() {
+  const s = SESS.cur;
+  const p = s && s.projId ? projById(s.projId) : null;
+  return p ? (p.instruction || "") : "";
+}
+function drawProj() {
+  const box = $("cs-proj");
+  if (!box) return;
+  box.innerHTML = PROJ.list.map(p =>
+    '<div class="projrow' + (PROJ.filter === p.id ? " on" : "") + '" data-id="' + p.id + '" ' +
+    'title="' + esc(p.instruction || "инструкция не задана") + '">' +
+    '<span class="pdot" style="background:' + p.color + '"></span>' +
+    '<span class="pem">' + esc(p.emoji || "📁") + "</span>" +
+    '<span class="pn">' + esc(p.name) + "</span>" +
+    '<span class="px" data-del="' + p.id + '" title="удалить проект (сессии сохранятся)">×</span></div>').join("") ||
+    '<div class="sub" style="padding:2px">проектов нет</div>';
+  box.querySelectorAll(".projrow").forEach(row => {
+    const id = +row.dataset.id;
+    row.onclick = e => {
+      if (e.target.dataset.del) return;
+      PROJ.filter = (PROJ.filter === id) ? null : id;
+      drawProj();
+      drawSess();
+    };
+    const del = row.querySelector(".px");
+    if (del) del.onclick = e => {
+      e.stopPropagation();
+      if (!confirm("Удалить проект? Сессии останутся, но без проекта.")) return;
+      PROJ.list = PROJ.list.filter(p => p.id !== id);
+      SESS.list.forEach(s => { if (s.projId === id) s.projId = null; });
+      if (PROJ.filter === id) PROJ.filter = null;
+      projSave();
+      sessSave();
+      drawProj();
+      drawSess();
+    };
+  });
+}
+function createProj() {
+  const name = prompt("Название проекта:");
+  if (!name || !name.trim()) return;
+  const emoji = prompt("Эмодзи/символ проекта (можно пропустить):", "📁") || "📁";
+  const ci = parseInt(prompt("Цвет: 0 синий, 1 фиолет, 2 золото, 3 зелёный, 4 красный, 5 серый", "0"), 10);
+  const color = PROJ_COLORS[isNaN(ci) ? 0 : Math.max(0, Math.min(5, ci))];
+  const instruction = prompt("Общая инструкция проекта для Моники (например: «мы учим английский — отвечай частью на английском»). Можно пропустить:", "") || "";
+  PROJ.list.push({id: Date.now(), name: name.trim().slice(0, 40),
+    emoji: emoji.trim().slice(0, 4) || "📁", color: color,
+    instruction: instruction.trim().slice(0, 500)});
+  projSave();
+  drawProj();
+}
+function closeSessMenu() {
+  const m = document.querySelector(".sessmenu");
+  if (m) m.remove();
+}
+function sessMenu(id, anchor) {
+  closeSessMenu();
+  const s = SESS.list.find(x => x.id === id);
+  if (!s) return;
+  const p = s.projId ? projById(s.projId) : null;
+  const m = document.createElement("div");
+  m.className = "sessmenu";
+  let html = '<button data-a="rename">Переименовать</button>' +
+    '<button data-a="pin">' + (s.pinned ? "Открепить" : "Закрепить") + "</button>" +
+    '<div class="sm-h">Проект: ' + esc(p ? p.name : "нет") + "</div>" +
+    PROJ.list.map(pp =>
+      '<button data-a="proj" data-id="' + pp.id + '">' +
+      (s.projId === pp.id ? "● " : "○ ") + esc(pp.name) + "</button>").join("");
+  if (s.projId) html += '<button data-a="proj" data-id="0">○ Без проекта</button>';
+  html += '<button data-a="del" class="danger">Удалить сессию</button>';
+  m.innerHTML = html;
+  document.body.appendChild(m);
+  const r = anchor.getBoundingClientRect();
+  m.style.top = Math.min(r.bottom + 4, window.innerHeight - m.offsetHeight - 8) + "px";
+  m.style.left = Math.max(8, r.left - 130) + "px";
+  m.onclick = e => {
+    const a = e.target.dataset.a;
+    if (!a) return;
+    closeSessMenu();
+    if (a === "rename") {
+      const t = prompt("Название сессии:", s.title);
+      if (t && t.trim()) { s.title = t.trim().slice(0, 60); sessSave(); drawSess(); }
+    } else if (a === "pin") {
+      s.pinned = !s.pinned; sessSave(); drawSess();
+    } else if (a === "proj") {
+      s.projId = +e.target.dataset.id || null;
+      sessSave(); drawSess();
+      if (SESS.cur && SESS.cur.id === id) openSess(id);
+    } else if (a === "del") {
+      SESS.list = SESS.list.filter(x => x.id !== id);
+      if (SESS.cur && SESS.cur.id === id) { SESS.cur = null; CHAT_HIST = []; openTab("chat"); }
+      sessSave(); drawSess();
+    }
+  };
+  setTimeout(() => document.addEventListener("click", closeSessMenu, {once: true}), 0);
 }
 function sessTrack(role, content) {
   const s = sessEnsure();
@@ -361,47 +471,33 @@ function sessTrack(role, content) {
 function drawSess() {
   const box = $("cs-sess");
   if (!box) return;
-  /* 8.9: поиск по сессиям; 6.11: закреплённые сверху */
+  /* 8.9: поиск; 6.11: закреплённые сверху; 6-S: фильтр по проекту */
   const q = (($("sess-q") && $("sess-q").value) || "").toLowerCase();
   const sorted = SESS.list.slice().sort((a, b) =>
     (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.id - a.id);
-  const shown = sorted.filter(s => !q || (s.title || "").toLowerCase().includes(q));
-  box.innerHTML = shown.length ? shown.map(s =>
-    '<div class="sessrow' + (SESS.cur && s.id === SESS.cur.id ? " on" : "") +
-    (s.pinned ? " pinned" : "") + '" data-id="' + s.id + '">' +
-    '<span class="spin" data-pin="' + s.id + '" title="закрепить/открепить">' +
-    (s.pinned ? "📌" : "📍") + "</span>" +
-    '<span class="st" data-ren="' + s.id + '" title="двойной клик — переименовать">' +
-    esc(s.title || "Новая сессия") + "</span>" +
-    '<span class="sx" data-del="' + s.id + '" title="удалить сессию">×</span></div>').join("") :
-    '<div class="sub" style="padding:4px 2px">' + (q ? "не найдено" : "сессий пока нет") + "</div>";
+  let shown = sorted.filter(s => !q || (s.title || "").toLowerCase().includes(q));
+  if (PROJ.filter !== null) shown = shown.filter(s => s.projId === PROJ.filter);
+  box.innerHTML = shown.length ? shown.map(s => {
+    const p = s.projId ? projById(s.projId) : null;
+    return '<div class="sessrow' + (SESS.cur && s.id === SESS.cur.id ? " on" : "") +
+      (s.pinned ? " pinned" : "") + '" data-id="' + s.id + '">' +
+      (p ? '<span class="pdot" style="background:' + p.color + '" title="проект: ' +
+        esc(p.name) + '"></span>' : "") +
+      '<span class="st">' + esc(s.title || "Новая сессия") + "</span>" +
+      '<span class="smore" data-menu="' + s.id + '" title="действия">⋯</span></div>';
+  }).join("") :
+    '<div class="sub" style="padding:4px 2px">' +
+    (q || PROJ.filter !== null ? "не найдено" : "сессий пока нет") + "</div>";
   box.querySelectorAll(".sessrow").forEach(row => {
     const id = +row.dataset.id;
     row.onclick = e => {
-      if (e.target.dataset.del || e.target.dataset.pin) return;
+      if (e.target.dataset.menu) return;
       openSess(id);
     };
-    const pin = row.querySelector(".spin");
-    if (pin) pin.onclick = e => {
+    const more = row.querySelector(".smore");
+    if (more) more.onclick = e => {
       e.stopPropagation();
-      const s = SESS.list.find(x => x.id === id);
-      if (s) { s.pinned = !s.pinned; sessSave(); drawSess(); }
-    };
-    const ren = row.querySelector(".st");
-    if (ren) ren.ondblclick = e => {
-      e.stopPropagation();
-      const s = SESS.list.find(x => x.id === id);
-      if (!s) return;
-      const t = prompt("Новое название сессии:", s.title);
-      if (t && t.trim()) { s.title = t.trim().slice(0, 60); sessSave(); drawSess(); }
-    };
-    const del = row.querySelector(".sx");
-    if (del) del.onclick = e => {
-      e.stopPropagation();
-      SESS.list = SESS.list.filter(x => x.id !== id);
-      if (SESS.cur && SESS.cur.id === id) { SESS.cur = null; CHAT_HIST = []; openTab("chat"); }
-      sessSave();
-      drawSess();
+      sessMenu(id, more);
     };
   });
 }
@@ -461,15 +557,21 @@ function renderShell() {
     '<div class="st"><i></i>онлайн</div>' +
     '<div class="cnt">реплик в сессии: <b id="pf-cnt">0</b></div>' +
     "</div>" +
-    /* 5-H.7 + 6-S: список сессий чата под профильной карточкой */
+    /* 5-H.7 + 6-S: сессии и проекты под профильной карточкой */
     '<div class="cs-sess-h">сессии</div>' +
     '<input class="minput sess-q" id="sess-q" placeholder="поиск…" autocomplete="off">' +
     '<div id="cs-sess" class="sesslist"></div>' +
-    '<button type="button" class="sess-new" id="sess-new">+ новая сессия</button>';
+    '<button type="button" class="sess-new" id="sess-new">+ новая сессия</button>' +
+    '<div class="cs-sess-h">проекты</div>' +
+    '<div id="cs-proj" class="projlist"></div>' +
+    '<button type="button" class="sess-new" id="proj-new">+ новый проект</button>';
   sessLoad();
+  projLoad();
   drawSess();
+  drawProj();
   $("sess-q").addEventListener("input", drawSess);
   $("sess-new").onclick = newSess;
+  $("proj-new").onclick = createProj;
   $("cs-logout").onclick = async () => { await api("/api/logout", {}); location.reload(); };
   /* 5-I: солнце открывает настройки и подсвечивает вкладку в правом меню */
   $("cs-gear").onclick = () => openTab("set");
@@ -657,7 +759,8 @@ async function chatTurn(text) {
   try {
     const r = await fetch("/api/chat/stream", {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({message: text, history: CHAT_HIST.slice(-20)})});
+      body: JSON.stringify({message: text, history: CHAT_HIST.slice(-20),
+        project_instruction: curInstr()})});
     if (!r.ok) {
       const e = await r.json().catch(() => ({}));
       throw new Error(e.error || "HTTP " + r.status);
