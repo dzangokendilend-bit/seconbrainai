@@ -80,9 +80,17 @@ function inl(x) {
 /* ── вход ── */
 function renderLogin() {
   show("scr-login");
+  /* 6-P: подсказка пароля — только после 3 неудачных попыток подряд с одним юзернеймом */
+  let fails = 0, failUser = "";
+  $("l-hint").classList.add("hidden");
+  $("l-hintbox").innerHTML = "";
   $("l-go").onclick = async () => {
-    const r = await api("/api/login", {username: $("l-user").value.trim(), password: $("l-pass").value});
-    if (r.data.ok) boot(); else $("l-err").textContent = r.data.error || "ошибка";
+    const u = $("l-user").value.trim();
+    const r = await api("/api/login", {username: u, password: $("l-pass").value});
+    if (r.data.ok) { boot(); return; }
+    $("l-err").textContent = r.data.error || "ошибка";
+    if (u === failUser) fails++; else { failUser = u; fails = 1; }
+    if (fails >= 3) $("l-hint").classList.remove("hidden");
   };
   $("l-hint").onclick = async () => {
     const r = await api("/api/hint", {username: $("l-user").value.trim()});
@@ -111,8 +119,19 @@ function modelName(id) {
 
 function renderWizard() {
   show("scr-wizard");
-  W.step = 1;
+  /* 8.4: черновик онбординга — вернулся и продолжил с того же шага */
+  try {
+    const d = JSON.parse(localStorage.getItem("monica_wizard_draft") || "null");
+    if (d && d.step >= 1) Object.assign(W, d);
+  } catch (e) {}
+  W.step = Math.min(Math.max(W.step || 1, 1), 7);
   fetch("/api/models").then(r => r.json()).then(c => { CFGM = c; renderW(); });
+}
+function wDraftSave() {
+  try { localStorage.setItem("monica_wizard_draft", JSON.stringify(W)); } catch (e) {}
+}
+function wDraftClear() {
+  try { localStorage.removeItem("monica_wizard_draft"); } catch (e) {}
 }
 
 /* Фаза 5-C: SVG-глиф у заголовка каждого шага (stroke-стиль chat.html) */
@@ -143,9 +162,9 @@ function wBind(next) {
     const err = await next();
     $("w-next").disabled = false;
     if (err) { $("w-err").textContent = err; return; }
-    W.step++; renderW();
+    W.step++; wDraftSave(); renderW();
   };
-  if ($("w-back")) $("w-back").onclick = () => { W.step--; renderW(); };
+  if ($("w-back")) $("w-back").onclick = () => { W.step--; wDraftSave(); renderW(); };
 }
 
 function renderW() {
@@ -166,8 +185,11 @@ function renderW() {
       "<p>Твоё личное ИИ-пространство: заметки, чат, модули и терминал — в одном спокойном месте.</p>" +
       '<p class="sub">За 7 коротких шагов соберём аккаунт: расскажешь, откуда ты, как будешь пользоваться, выберешь модули и подключишь ключи моделей.</p>' +
       '<span class="beta-tag">🔒 закрытое тестирование · доступ для друзей и бета-тестеров</span>' +
-      '<button class="mbtn acc" id="w-next">Начать →</button></div>';
-    $("w-next").onclick = () => { W.step = 2; renderW(); };
+      '<div class="wz-back-row"><button class="mbtn" id="w-exit">← на главную</button>' +
+      '<button class="mbtn acc" id="w-next">Начать →</button></div></div>';
+    /* 6.4: возврат на главную (черновик сохраняется — можно продолжить позже) */
+    $("w-exit").onclick = () => { wDraftSave(); renderLogin(); };
+    $("w-next").onclick = () => { W.step = 2; wDraftSave(); renderW(); };
   } else if (W.step === 2) {
     wz.innerHTML = wHead("Пара вопросов") +
       '<label>Откуда вы узнали о нас?</label><div id="w-src"></div>' +
@@ -271,7 +293,7 @@ function renderW() {
         survey: {source: W.source, purpose: W.purpose},
         prefs: {language: W.language, model: W.model, daily_load: W.daily_load},
         modules: W.modules, analytics_password: W.analytics_password, keys: W.keys});
-      if (r.data.ok) { boot(); return null; }
+      if (r.data.ok) { wDraftClear(); boot(); return null; }
       return r.data.error || "ошибка сохранения";
     });
   }
@@ -318,8 +340,9 @@ function sessSave() {
 function sessEnsure() {
   if (!SESS.cur) {
     SESS.cur = {id: Date.now(), title: "Новая сессия",
+      started: new Date().toISOString(),
       ts: new Date().toLocaleString("ru-RU", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"}),
-      msgs: []};
+      pinned: false, msgs: []};
     SESS.list.push(SESS.cur);
   }
   return SESS.cur;
@@ -338,20 +361,43 @@ function sessTrack(role, content) {
 function drawSess() {
   const box = $("cs-sess");
   if (!box) return;
-  box.innerHTML = SESS.list.slice().reverse().map(s =>
-    '<div class="sessrow' + (SESS.cur && s.id === SESS.cur.id ? " on" : "") + '" data-id="' + s.id + '">' +
-    '<span class="st">' + esc(s.title) + "</span>" +
-    '<span class="sx" data-del="' + s.id + '" title="удалить сессию">×</span></div>').join("") ||
-    '<div class="sub" style="padding:4px 2px">сессий пока нет</div>';
+  /* 8.9: поиск по сессиям; 6.11: закреплённые сверху */
+  const q = (($("sess-q") && $("sess-q").value) || "").toLowerCase();
+  const sorted = SESS.list.slice().sort((a, b) =>
+    (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.id - a.id);
+  const shown = sorted.filter(s => !q || (s.title || "").toLowerCase().includes(q));
+  box.innerHTML = shown.length ? shown.map(s =>
+    '<div class="sessrow' + (SESS.cur && s.id === SESS.cur.id ? " on" : "") +
+    (s.pinned ? " pinned" : "") + '" data-id="' + s.id + '">' +
+    '<span class="spin" data-pin="' + s.id + '" title="закрепить/открепить">' +
+    (s.pinned ? "📌" : "📍") + "</span>" +
+    '<span class="st" data-ren="' + s.id + '" title="двойной клик — переименовать">' +
+    esc(s.title || "Новая сессия") + "</span>" +
+    '<span class="sx" data-del="' + s.id + '" title="удалить сессию">×</span></div>').join("") :
+    '<div class="sub" style="padding:4px 2px">' + (q ? "не найдено" : "сессий пока нет") + "</div>";
   box.querySelectorAll(".sessrow").forEach(row => {
+    const id = +row.dataset.id;
     row.onclick = e => {
-      if (e.target.dataset.del) return;
-      openSess(+row.dataset.id);
+      if (e.target.dataset.del || e.target.dataset.pin) return;
+      openSess(id);
+    };
+    const pin = row.querySelector(".spin");
+    if (pin) pin.onclick = e => {
+      e.stopPropagation();
+      const s = SESS.list.find(x => x.id === id);
+      if (s) { s.pinned = !s.pinned; sessSave(); drawSess(); }
+    };
+    const ren = row.querySelector(".st");
+    if (ren) ren.ondblclick = e => {
+      e.stopPropagation();
+      const s = SESS.list.find(x => x.id === id);
+      if (!s) return;
+      const t = prompt("Новое название сессии:", s.title);
+      if (t && t.trim()) { s.title = t.trim().slice(0, 60); sessSave(); drawSess(); }
     };
     const del = row.querySelector(".sx");
     if (del) del.onclick = e => {
       e.stopPropagation();
-      const id = +del.dataset.del;
       SESS.list = SESS.list.filter(x => x.id !== id);
       if (SESS.cur && SESS.cur.id === id) { SESS.cur = null; CHAT_HIST = []; openTab("chat"); }
       sessSave();
@@ -364,7 +410,14 @@ function openSess(id) {
   if (!s) return;
   SESS.cur = s;
   CHAT_HIST = s.msgs.slice();
-  openTab("chat");
+  openTab("chat", {skipAnim: true});
+  /* 6.10: дата начала сессии в подзаголовке */
+  if (s.started) {
+    const d = new Date(s.started);
+    $("m-sub").textContent += " · сессия начата " +
+      d.toLocaleDateString("ru-RU", {day: "numeric", month: "long"}) + ", " +
+      d.toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"});
+  }
   const log = $("chat-log");
   if (log) {
     log.innerHTML = "";
@@ -408,12 +461,14 @@ function renderShell() {
     '<div class="st"><i></i>онлайн</div>' +
     '<div class="cnt">реплик в сессии: <b id="pf-cnt">0</b></div>' +
     "</div>" +
-    /* 5-H.7: список сессий чата под профильной карточкой */
+    /* 5-H.7 + 6-S: список сессий чата под профильной карточкой */
     '<div class="cs-sess-h">сессии</div>' +
+    '<input class="minput sess-q" id="sess-q" placeholder="поиск…" autocomplete="off">' +
     '<div id="cs-sess" class="sesslist"></div>' +
     '<button type="button" class="sess-new" id="sess-new">+ новая сессия</button>';
   sessLoad();
   drawSess();
+  $("sess-q").addEventListener("input", drawSess);
   $("sess-new").onclick = newSess;
   $("cs-logout").onclick = async () => { await api("/api/logout", {}); location.reload(); };
   /* 5-I: солнце открывает настройки и подсвечивает вкладку в правом меню */
@@ -453,7 +508,7 @@ function setTitleTab(tab) {
   cycle();
 }
 
-function openTab(tab) {
+function openTab(tab, opts) {
   TAB = tab;
   setTitleTab(tab);
   $("m-sub").textContent = new Date().toLocaleDateString("ru-RU", {day: "numeric", month: "long", weekday: "long"});
@@ -463,11 +518,14 @@ function openTab(tab) {
   /* 5-I: активная вкладка в правом меню синхронизируется всегда (солнце/сессии) */
   document.querySelectorAll(".cs-navitem").forEach(x => x.classList.toggle("on", x.dataset.tab === tab));
   ({chat: tabChat, term: tabTerm, wiki: tabWiki, tg: tabTg, ana: tabAna, set: tabSet})[tab](ME);
-  /* Полировка-1: slide+fade переход между модулями (в духе .wz-in) */
-  const body = $("m-body");
-  body.classList.remove("tab-in");
-  void body.offsetWidth;
-  body.classList.add("tab-in");
+  /* Полировка-1: slide+fade переход между модулями (в духе .wz-in).
+     6.13: при переключении сессий анимации нет — иначе мигает чужая сессия */
+  if (!(opts && opts.skipAnim)) {
+    const body = $("m-body");
+    body.classList.remove("tab-in");
+    void body.offsetWidth;
+    body.classList.add("tab-in");
+  }
 }
 
 /* ── чат: лента, пустой экран с подсказками, стриминг, thinking-фразы ── */
@@ -480,7 +538,8 @@ function tabChat(p) {
   $("m-body").innerHTML =
     '<div id="chat-log" class="cs-log"></div>' +
     '<div id="cs-empty" class="cs-empty"><div class="cs-empty-t">С чего начнём?</div>' +
-    '<div class="beta"><h3><i>🔒</i>Закрытое тестирование</h3>' +
+    '<div class="beta" id="beta-box"><button type="button" class="beta-min" id="beta-min" title="свернуть">–</button>' +
+    '<h3><i>🔒</i>Закрытое тестирование</h3>' +
     "<p>Моника работает в тестовом режиме: это закрытая бета для друзей и бета-тестеров, часть функций ещё в разработке, возможны странности.</p>" +
     '<p>Нашёл баг или есть идея — пиши автору в Telegram: <a href="https://t.me/sozrelyy" target="_blank" rel="noopener">@sozrelyy</a>. Баг-репорты и предложения очень помогают.</p>' +
     "<p>Твои заметки и данные принадлежат только тебе.</p></div></div>" +
@@ -534,6 +593,18 @@ function tabChat(p) {
       if (b) b.classList.remove("open");
     });
   }
+  /* 8.8: баннер сворачивается в маленький бейдж */
+  const bb = $("beta-box"), bmin = $("beta-min");
+  const setMin = v => {
+    bb.classList.toggle("min", v);
+    bmin.textContent = v ? "🔒 бета" : "–";
+  };
+  try { setMin(localStorage.getItem("monica_beta_min") === "1"); } catch (e) {}
+  bmin.onclick = () => {
+    const v = !bb.classList.contains("min");
+    setMin(v);
+    try { localStorage.setItem("monica_beta_min", v ? "1" : "0"); } catch (e) {}
+  };
   const resize = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px"; };
   input.addEventListener("input", resize);
   input.addEventListener("keydown", e => {
