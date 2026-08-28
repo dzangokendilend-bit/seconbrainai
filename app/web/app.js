@@ -1028,6 +1028,8 @@ function tabTerm(p) {
   });
   drawTree();
   drawHist();
+  /* 6-W: правка статьи из вики — редактор открывается сразу с файлом */
+  if (TERM.view === "edit" && TERM.openFile) loadEditor();
 }
 
 function closeTreeMenu() {
@@ -1344,9 +1346,15 @@ function tabWiki(p) {
     "</header>" +
     '<div class="wk-shell">' +
     '<nav class="side wk-side" id="wk-arts">' +
+    '<div class="sgroup"><h3>Навигация</h3><ul>' +
+    '<li><a href="#" id="wk-nav-home">Заглавная страница</a></li>' +
+    '<li><a href="#" id="wk-nav-random">Случайная статья</a></li>' +
+    '<li><a href="#" id="wk-nav-all">Все статьи</a></li></ul></div>' +
     '<div class="sgroup"><h3>Статьи</h3><ul id="wk-arts-ul"></ul></div>' +
     '<div class="sgroup"><h3>Инструменты</h3><ul>' +
     '<li><a href="#" id="wk-nav-search">Поиск по заметкам</a></li>' +
+    '<li><a href="#" id="wk-nav-links">Ссылки сюда</a></li>' +
+    '<li><a href="#" id="wk-nav-edit">Править статью</a></li>' +
     '<li><a href="#" id="wk-nav-regen">Обновить вики</a></li></ul></div>' +
     "</nav>" +
     '<main class="content wk-content">' +
@@ -1373,24 +1381,37 @@ function tabWiki(p) {
     $("wk-arts").querySelectorAll("a[data-p]").forEach(el =>
       el.onclick = ev => { ev.preventDefault(); openArticle(el.dataset.p); });
   };
+  let WK_CUR = null;
   const openArticle = async path => {
     const r = await api("/api/wiki/articles", {path: path});
     if (r.data.error) { $("wk-view").innerHTML = '<p style="color:var(--red)">' + esc(r.data.error) + "</p>"; return; }
     const fm = parseFrontmatter(r.data.content);
     const title = fm.meta.title || (path.split("/").pop() || "").replace(/\.md$/, "");
-    /* инфобокс — родная таблица Иванопедии (style.css .infobox, float:right) */
+    WK_CUR = {path: path, title: title};
+    const bl = await api("/api/wiki/backlinks", {title: title});
+    const links = bl.data.backlinks || [];
+    /* 6-W: полный шаблон статьи Иванопедии — hatnote, инфобокс с портретом,
+       «Ссылки сюда», категории */
     $("wk-view").innerHTML =
       '<button type="button" class="cs-act" id="wk-back" style="margin-bottom:10px">← к списку статей</button>' +
+      (fm.meta.source ? '<div class="hatnote amber" style="margin:0 0 14px">Источник заметки: <b>' +
+        esc(fm.meta.source) + "</b></div>" : "") +
       '<h1 class="firstHeading">' + esc(title) + "</h1>" +
-      '<div class="wk-meta">' + esc(fm.meta.created || "") +
-      (fm.meta.source ? " · источник: " + esc(fm.meta.source) : "") + "</div>" +
+      '<div class="wk-meta">' + esc(fm.meta.created || "") + "</div>" +
       '<div class="body">' +
       '<table class="infobox"><caption>' + esc(title) + "</caption>" +
+      '<tr><td colspan="2" class="ib-portrait">📄</td></tr>' +
       "<tr><th>создано</th><td>" + esc(fm.meta.created || "—") + "</td></tr>" +
       "<tr><th>источник</th><td>" + esc(fm.meta.source || "—") + "</td></tr>" +
       "<tr><th>теги</th><td>" + esc(fm.meta.tags || "—") + "</td></tr>" +
       '<tr><td colspan="2" class="ib-foot">статья личной вики Моники</td></tr></table>' +
-      md(fm.body) + "</div>";
+      md(fm.body) +
+      (links.length ? '<h2 style="font-family:var(--serif);font-size:20px;margin:1.2em 0 .4em">Ссылки сюда</h2>' +
+        '<ul class="wk-links">' + links.map(l =>
+          '<li><a href="#" data-p="wiki/' + esc(l) + '.md">' + esc(l) + "</a></li>").join("") + "</ul>" : "") +
+      (fm.meta.tags ? '<div class="wk-cats">Категории: ' + fm.meta.tags.split(/[,;]\s*/)
+        .filter(Boolean).map(t => '<span class="tagc">' + esc(t) + "</span>").join(" ") + "</div>" : "") +
+      "</div>";
     $("wk-home").classList.add("hidden");
     $("wk-view").classList.remove("hidden");
     animTab($("wk-view"));
@@ -1398,6 +1419,41 @@ function tabWiki(p) {
       $("wk-view").classList.add("hidden");
       $("wk-home").classList.remove("hidden");
     };
+    $("wk-view").querySelectorAll(".wk-links a").forEach(a =>
+      a.onclick = ev => { ev.preventDefault(); openArticle(a.dataset.p); });
+  };
+  const showBacklinks = async () => {
+    if (!WK_CUR) { $("wk-res").innerHTML = '<p class="sub">Открой статью — тогда покажу, кто на неё ссылается.</p>'; return; }
+    const bl = await api("/api/wiki/backlinks", {title: WK_CUR.title});
+    const links = bl.data.backlinks || [];
+    $("wk-home").classList.add("hidden");
+    $("wk-view").classList.remove("hidden");
+    $("wk-view").innerHTML =
+      '<button type="button" class="cs-act" id="wk-back" style="margin-bottom:10px">← к статье «' +
+      esc(WK_CUR.title) + "»</button>" +
+      '<h1 class="firstHeading">Ссылки сюда</h1>' +
+      '<div class="wk-meta">статьи, упоминающие «' + esc(WK_CUR.title) + "»</div>" +
+      '<div class="body">' + (links.length ?
+        '<ul class="wk-links">' + links.map(l =>
+          '<li><a href="#" data-p="wiki/' + esc(l) + '.md">' + esc(l) + "</a></li>").join("") + "</ul>" :
+        "<p>Пока ни одна статья не ссылается на эту.</p>") + "</div>";
+    $("wk-back").onclick = () => {
+      $("wk-view").classList.add("hidden");
+      $("wk-home").classList.remove("hidden");
+    };
+  };
+  const editArticle = () => {
+    if (!WK_CUR) { $("wk-res").innerHTML = '<p class="sub">Сначала открой статью.</p>'; return; }
+    TERM.openFile = WK_CUR.path;
+    TERM.view = "edit";
+    openTab("term");
+  };
+  const randomArticle = () => {
+    api("/api/wiki/articles", {}).then(r => {
+      const arts = r.data.articles || [];
+      if (!arts.length) { $("wk-res").innerHTML = '<p class="sub">Статей пока нет.</p>'; return; }
+      openArticle(arts[Math.floor(Math.random() * arts.length)].path);
+    });
   };
   $("wk-regen").onclick = async () => {
     $("wk-regen").disabled = true;
@@ -1426,6 +1482,21 @@ function tabWiki(p) {
     });
   };
   $("wk-q").onkeydown = e => { if (e.key === "Enter") doSearch(); };
+  /* 6-W: навигация и инструменты Иванопедии */
+  $("wk-nav-home").onclick = ev => {
+    ev.preventDefault();
+    $("wk-view").classList.add("hidden");
+    $("wk-home").classList.remove("hidden");
+  };
+  $("wk-nav-random").onclick = ev => { ev.preventDefault(); randomArticle(); };
+  $("wk-nav-all").onclick = ev => {
+    ev.preventDefault();
+    $("wk-view").classList.add("hidden");
+    $("wk-home").classList.remove("hidden");
+    $("wk-res").innerHTML = '<p class="sub">Все статьи — в списке слева.</p>';
+  };
+  $("wk-nav-links").onclick = ev => { ev.preventDefault(); showBacklinks(); };
+  $("wk-nav-edit").onclick = ev => { ev.preventDefault(); editArticle(); };
   drawArts();
 }
 

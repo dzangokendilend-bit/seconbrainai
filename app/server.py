@@ -596,6 +596,16 @@ class Handler(BaseHTTPRequestHandler):
             self._json(mon_mods.summary(vault))
             return
 
+        if path == "/api/wiki/backlinks":
+            # 6-W: обратные ссылки — какие статьи вики ссылаются на [[title]]
+            vault = os.path.join(auth.user_dir(uid), "vault")
+            title = re.sub(r"\.md$", "", os.path.basename(str(body.get("title") or ""))).strip()
+            if not title:
+                self._json({"error": "укажи статью"}, 400)
+                return
+            self._json({"backlinks": mon_mods.backlinks(vault, title)})
+            return
+
         if path == "/api/tg/setup":
             token = (body.get("token") or "").strip()
             chat_id = str(body.get("chat_id") or "").strip()

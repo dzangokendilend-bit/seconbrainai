@@ -124,6 +124,28 @@ def articles(vault):
     return out
 
 
+def backlinks(vault, title):
+    """6-W: статьи вики, ссылающиеся на [[title]] (обратные ссылки)."""
+    wdir = os.path.join(vault, WIKI_DIR)
+    out = []
+    if not os.path.isdir(wdir):
+        return out
+    needle = ("[[" + title).lower()
+    for f in sorted(os.listdir(wdir)):
+        if not f.lower().endswith(".md"):
+            continue
+        own = f[:-3].lower()
+        if own == title.lower():
+            continue
+        try:
+            with open(os.path.join(wdir, f), encoding="utf-8", errors="replace") as fh:
+                if needle in fh.read().lower():
+                    out.append(f[:-3])
+        except Exception:
+            continue
+    return out
+
+
 def generate_article(vault, note_rel, api_key):
     """Пишет энциклопедическую статью по заметке через smart-модель.
     Шаблон — стиль Иванопедии: front-matter + серифные секции."""
