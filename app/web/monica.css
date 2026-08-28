@@ -170,15 +170,19 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 .wk-topbar{position:static;margin-bottom:14px}
 .wk-topbar .searchbox{flex:1;max-width:520px}
 .wk-topbar .btn-black{cursor:pointer;font-family:var(--ui)}
-.wk-shell{padding:0;max-width:none;gap:16px}
-.wk-shell .side{position:static;width:225px;max-height:64vh;overflow-y:auto}
-.wk-shell .content{max-width:none}
+.wk-shell{display:flex;flex-direction:row-reverse;align-items:flex-start;
+  padding:0;max-width:none;gap:16px}
+.wk-shell .side{position:static;width:225px;flex:none;max-height:64vh;
+  overflow-y:auto;align-self:stretch}
+.wk-shell .content{max-width:none;flex:1;min-width:0}
 .wk-meta{color:var(--muted);font-size:12px;margin:-4px 0 14px;
   padding-bottom:10px;border-bottom:1px solid var(--border)}
 .firstHeading{font-family:var(--serif);font-size:26px;margin:14px 0 10px;
   border-bottom:1px solid var(--border);padding-bottom:8px}
 /* 6-W: полный шаблон статьи Иванопедии */
-.ib-portrait{text-align:center;font-size:44px;padding:18px 8px;
+/* 5-I фикс: в узкой панели инфобокс — компактная таблица на всю ширину, без float */
+.wk-ib{float:none;width:100%;margin:0 0 16px}
+.ib-portrait{text-align:center;font-size:34px;padding:12px;
   background:rgba(255,255,255,.03)}
 .wk-links{list-style:none;margin:.4em 0;padding:0}
 .wk-links li{padding:4px 0}

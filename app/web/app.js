@@ -1372,13 +1372,13 @@ function tabWiki(p) {
     const arts = r.data.articles || [];
     $("wk-regen").textContent = "Обновить вики" +
       (r.data.queued ? " (" + r.data.queued + " в очереди)" : "");
-    $("wk-arts").innerHTML =
-      '<div class="sgroup"><h3>Статьи</h3><ul>' +
-      (arts.length ? arts.map(a =>
-        '<li><a href="#" data-p="' + esc(a.path) + '">' + esc(a.title) + "</a></li>").join("")
-        : '<li><span class="sub">Статей пока нет — «Обновить вики» создаст их из очереди.</span></li>') +
-      "</ul></div>";
-    $("wk-arts").querySelectorAll("a[data-p]").forEach(el =>
+    /* 5-I фикс: обновляем только список статей, не затирая Навигацию/Инструменты */
+    const ul = $("wk-arts-ul");
+    if (!ul) return;
+    ul.innerHTML = arts.length ? arts.map(a =>
+      '<li><a href="#" data-p="' + esc(a.path) + '">' + esc(a.title) + "</a></li>").join("")
+      : '<li><span class="sub">Статей пока нет — «Обновить вики» создаст их из очереди.</span></li>';
+    ul.querySelectorAll("a[data-p]").forEach(el =>
       el.onclick = ev => { ev.preventDefault(); openArticle(el.dataset.p); });
   };
   let WK_CUR = null;
@@ -1393,19 +1393,16 @@ function tabWiki(p) {
     /* 6-W: полный шаблон статьи Иванопедии — hatnote, инфобокс с портретом,
        «Ссылки сюда», категории */
     $("wk-view").innerHTML =
-      '<button type="button" class="cs-act" id="wk-back" style="margin-bottom:10px">← к списку статей</button>' +
       (fm.meta.source ? '<div class="hatnote amber" style="margin:0 0 14px">Источник заметки: <b>' +
         esc(fm.meta.source) + "</b></div>" : "") +
       '<h1 class="firstHeading">' + esc(title) + "</h1>" +
-      '<div class="wk-meta">' + esc(fm.meta.created || "") + "</div>" +
-      '<div class="body">' +
-      '<table class="infobox"><caption>' + esc(title) + "</caption>" +
+      '<table class="infobox wk-ib"><caption>' + esc(title) + "</caption>" +
       '<tr><td colspan="2" class="ib-portrait">📄</td></tr>' +
       "<tr><th>создано</th><td>" + esc(fm.meta.created || "—") + "</td></tr>" +
       "<tr><th>источник</th><td>" + esc(fm.meta.source || "—") + "</td></tr>" +
       "<tr><th>теги</th><td>" + esc(fm.meta.tags || "—") + "</td></tr>" +
       '<tr><td colspan="2" class="ib-foot">статья личной вики Моники</td></tr></table>' +
-      md(fm.body) +
+      '<div class="body">' + md(fm.body) +
       (links.length ? '<h2 style="font-family:var(--serif);font-size:20px;margin:1.2em 0 .4em">Ссылки сюда</h2>' +
         '<ul class="wk-links">' + links.map(l =>
           '<li><a href="#" data-p="wiki/' + esc(l) + '.md">' + esc(l) + "</a></li>").join("") + "</ul>" : "") +
