@@ -120,8 +120,11 @@ const consoleErrors = [], badResponses = [];
   await new Promise(r => setTimeout(r, 500));
   ok("вики: секция статей отрисована", await page.$("#wk-arts"));
   ok("вики: анимация открытия (.wk-open)", await page.$("#m-body .wk-open"));
-  ok("полировка: инфобокс статьи", await page.$("#wk-info"));
-  ok("полировка: трёхзонная раскладка вики", await page.$(".wk-layout .wk-side"));
+  ok("5-H: вики — разметка Иванопедии (.shell/.side/.content)",
+    (await page.$(".wk-shell .side")) && (await page.$(".wk-shell .content .firstHeading")));
+  ok("5-H: вики — список статей в .sgroup", await page.$("#wk-arts .sgroup"));
+  ok("5-H: сессии — панель и кнопка новой сессии",
+    (await page.$("#cs-sess")) && (await page.$("#sess-new")));
   await tab("tg", "#tg-body", "статус бота");
   await tab("ana", ".stat-grid", "сводка аналитики");
   await tab("set", ".set-tab.on", "вкладки настроек");

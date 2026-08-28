@@ -153,36 +153,33 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 .wglyph svg{width:20px;height:20px;color:var(--link)}
 .mhint{font-size:11.5px;color:var(--muted);margin:-8px 0 10px}
 
-/* ── виток F + Полировка-1: личная вики в стиле Иванопедии ── */
+/* ── виток F + 5-H.6: личная вики — разметка Иванопедии (.shell/.side/.sgroup/
+   .content/.firstHeading/.body/.infobox берутся из style.css 1:1) ── */
 .wk-open{animation:wkopen .35s ease;width:100%}
 @keyframes wkopen{from{opacity:0;transform:scale(.965)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion: reduce){.wk-open{animation:none}}
 .wk-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
 .wk-h{font-family:var(--serif);font-size:24px;margin:0}
-.wk-layout{display:grid;grid-template-columns:230px minmax(0,1fr) 240px;gap:14px;width:100%}
-.wk-side{border:1px solid var(--border);border-radius:var(--r-sm);
-  background:rgba(255,255,255,.03);padding:8px;max-height:66vh;overflow-y:auto}
-.wk-side .wl{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px}
-.wk-side .wl-t{cursor:pointer}
+.wk-shell{padding:0;max-width:none;gap:16px}
+.wk-shell .side{position:static;width:225px;max-height:64vh;overflow-y:auto}
+.wk-shell .content{max-width:none}
 .wk-meta{color:var(--muted);font-size:12px;margin:-4px 0 14px;
   padding-bottom:10px;border-bottom:1px solid var(--border)}
 .firstHeading{font-family:var(--serif);font-size:26px;margin:14px 0 10px;
   border-bottom:1px solid var(--border);padding-bottom:8px}
-.wk-infobox{align-self:start;border:1px solid var(--border);border-radius:var(--r-sm);
-  background:rgba(0,0,0,.25);padding:12px;font-size:12px}
-.wk-infobox b{display:block;font-family:var(--serif);font-size:14px;margin-bottom:8px}
-.wk-infobox .irow{display:flex;justify-content:space-between;gap:8px;padding:5px 0;
-  border-bottom:1px dashed rgba(255,255,255,.08);word-break:break-all}
-.wk-infobox .irow span:first-child{color:var(--muted);flex:none}
-@media (max-width:1100px){.wk-layout{grid-template-columns:1fr}}
+@media (max-width:1100px){.wk-shell{flex-direction:column}.wk-shell .side{width:100%;max-height:200px}}
 
 /* ── виток E + Полировка-1: Терминал 2.0 — три панели ── */
 /* терминал расширяет каркас: центральная панель доминирует, меню уезжает правее */
 .cs.term-wide{max-width:1400px}
-.tgrid{display:grid;grid-template-columns:240px minmax(0,1fr) 300px;gap:14px;
-  flex:1;min-height:0;width:100%;padding-left:22px}
-.tpane{border:1px solid var(--border);border-radius:var(--r-sm);background:rgba(255,255,255,.03);
-  padding:10px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.tgrid{display:grid;grid-template-columns:230px minmax(0,1fr) 290px;gap:16px;
+  flex:1;min-height:0;width:100%;padding-left:24px}
+/* 5-H: панели читаются как отдельные зоны — рамка + мягкая тень, без утяжеления */
+.tpane{border:1px solid rgba(255,255,255,.10);border-radius:var(--r-sm);
+  background:rgba(255,255,255,.03);box-shadow:0 8px 26px rgba(0,0,0,.35);
+  padding:12px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.tpane-mid{border-color:rgba(143,180,255,.22);
+  box-shadow:0 10px 32px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.10)}
 .tpane .cs-menu-h{margin-bottom:8px}
 .ttree,.thist{overflow-y:auto;font-size:12px}
 .tfile{display:block;width:100%;text-align:left;padding:6px 9px;border:none;border-radius:8px;
@@ -191,9 +188,13 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 .tfile.sel{background:rgba(143,180,255,.10);color:var(--acc)}
 .tmid-switch{display:flex;gap:6px;margin-bottom:8px}
 #tchat{display:flex;flex-direction:column;flex:1;min-height:0}
-/* Полировка-1: чат-поле терминала — фокус → плавное многострочное расширение */
-#t-input{transition:min-height .22s ease}
-#tbar.tfocus #t-input{min-height:120px}
+/* ── 5-H.3: чат-поле терминала (отдельный блок) ──
+   #t-input  — базовая компактная высота, текст/курсор центрированы
+   #tbar.tfocus #t-input — фокус: плавное расширение до многострочного
+   blur с пустым полем снимает .tfocus (см. tabTerm в app.js) */
+#t-input{height:46px;min-height:46px;padding:11px 14px;line-height:1.25;
+  transition:height .22s ease-out}
+#tbar.tfocus #t-input{height:120px}
 @media (prefers-reduced-motion: reduce){#t-input{transition:none}}
 
 /* Полировка-1: редактор в духе VS Code, но в палитре Моники */
@@ -216,9 +217,13 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
   line-height:1.55;padding:12px 14px;white-space:pre-wrap}
 .te-area::selection{background:rgba(143,180,255,.28)}
 
-/* Полировка-1: slide+fade переход между модулями (в духе .wz-in) */
-.tab-in{animation:tabin .28s ease}
-@keyframes tabin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+/* ── 5-H.1: переход между модулями, Вариант A — fade-доминанта ──
+   Смещение 10px, 0.22s ease-out, применяется только к #m-body (контент),
+   каркас и фон не двигаются. Числа правятся здесь же.
+   Вариант B (запас): чистый fade — from{opacity:0} без transform, .18s
+   Вариант C (запас): fade + scale — from{opacity:0;transform:scale(.995)}, .2s */
+.tab-in{animation:tabin .22s ease-out}
+@keyframes tabin{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion: reduce){.tab-in{animation:none}}
 .thist-row{padding:7px 4px;border-bottom:1px solid rgba(255,255,255,.06);
   display:flex;flex-wrap:wrap;gap:5px;align-items:center;word-break:break-all}
@@ -246,13 +251,32 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 .cs-modelbtn:hover{color:var(--text);border-color:rgba(255,255,255,.3)}
 .cs-modelbtn .dot{width:6px;height:6px;border-radius:50%;background:var(--acc);
   box-shadow:0 0 6px rgba(143,180,255,.6)}
+/* 5-H.5: поп-ап модели — всегда в пределах viewport */
 .cs-modelmenu{position:absolute;top:calc(100% + 8px);right:0;z-index:40;min-width:270px;
+  max-height:min(420px,60vh);overflow-y:auto;
   background:rgba(14,14,17,.96);border:1px solid var(--border);border-radius:15px;
   box-shadow:var(--shadow-panel);padding:6px;display:none}
 .cs-modelmenu.open{display:block;animation:wzin .2s ease}
+.cs-modelmenu.up{top:auto;bottom:calc(100% + 8px)}
 .cs-modelmenu button{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;
   padding:9px 12px;border:none;border-radius:10px;background:none;color:var(--text);
   font-family:var(--ui);font-size:13px;cursor:pointer}
 .cs-modelmenu button:hover{background:rgba(255,255,255,.07)}
 .cs-modelmenu button.sel{background:rgba(143,180,255,.10)}
 .cs-modelmenu button .d{font-size:11px;color:var(--muted)}
+
+/* ── 5-H.7: сессии чата в правой панели ── */
+.cs-sess-h{font-size:10px;letter-spacing:.8px;text-transform:uppercase;
+  color:var(--muted);margin-top:10px;padding:0 2px}
+.sesslist{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+.sessrow{display:flex;align-items:center;gap:7px;width:100%;text-align:left;
+  padding:7px 9px;border:none;border-radius:9px;background:none;color:var(--text);
+  font-family:var(--ui);font-size:12px;cursor:pointer;word-break:break-all}
+.sessrow:hover{background:rgba(255,255,255,.07)}
+.sessrow.on{background:rgba(143,180,255,.10);color:var(--acc)}
+.sessrow .sx{margin-left:auto;flex:none;opacity:.4;font-size:13px;line-height:1}
+.sessrow .sx:hover{opacity:1;color:var(--red)}
+.sess-new{width:100%;margin-top:6px;padding:7px 10px;border-radius:9px;
+  border:1px dashed var(--border);background:none;color:var(--muted);
+  font-family:var(--ui);font-size:11.5px;cursor:pointer}
+.sess-new:hover{color:var(--text);border-color:rgba(255,255,255,.3)}

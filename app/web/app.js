@@ -304,6 +304,91 @@ const TITLES = {chat: "Чат с Моникой", term: "Терминал", wiki
   tg: "Telegram-бот", ana: "Полная аналитика", set: "Настройки"};
 let ME = null, TAB = "chat", CHAT_HIST = [];
 
+/* ── 5-H.7: сессии чата — localStorage, только фронт (бэкенд не тронут) ── */
+let SESS = {list: [], cur: null};
+function sessKey() { return "monica_sess_" + ((ME && ME.username) || "anon"); }
+function sessLoad() {
+  try { SESS.list = JSON.parse(localStorage.getItem(sessKey()) || "[]") || []; }
+  catch (e) { SESS.list = []; }
+  SESS.cur = null;
+}
+function sessSave() {
+  try { localStorage.setItem(sessKey(), JSON.stringify(SESS.list.slice(-30))); } catch (e) {}
+}
+function sessEnsure() {
+  if (!SESS.cur) {
+    SESS.cur = {id: Date.now(), title: "Новая сессия",
+      ts: new Date().toLocaleString("ru-RU", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"}),
+      msgs: []};
+    SESS.list.push(SESS.cur);
+  }
+  return SESS.cur;
+}
+function sessTrack(role, content) {
+  const s = sessEnsure();
+  s.msgs.push({role: role, content: content});
+  if (role === "user" && s.msgs.filter(m => m.role === "user").length === 1)
+    s.title = content.slice(0, 42) || "Новая сессия";
+  s.ts = new Date().toLocaleString("ru-RU", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"});
+  sessSave();
+  drawSess();
+  const cnt = $("pf-cnt");
+  if (cnt) cnt.textContent = s.msgs.length;
+}
+function drawSess() {
+  const box = $("cs-sess");
+  if (!box) return;
+  box.innerHTML = SESS.list.slice().reverse().map(s =>
+    '<div class="sessrow' + (SESS.cur && s.id === SESS.cur.id ? " on" : "") + '" data-id="' + s.id + '">' +
+    '<span class="st">' + esc(s.title) + "</span>" +
+    '<span class="sx" data-del="' + s.id + '" title="удалить сессию">×</span></div>').join("") ||
+    '<div class="sub" style="padding:4px 2px">сессий пока нет</div>';
+  box.querySelectorAll(".sessrow").forEach(row => {
+    row.onclick = e => {
+      if (e.target.dataset.del) return;
+      openSess(+row.dataset.id);
+    };
+    const del = row.querySelector(".sx");
+    if (del) del.onclick = e => {
+      e.stopPropagation();
+      const id = +del.dataset.del;
+      SESS.list = SESS.list.filter(x => x.id !== id);
+      if (SESS.cur && SESS.cur.id === id) { SESS.cur = null; CHAT_HIST = []; openTab("chat"); }
+      sessSave();
+      drawSess();
+    };
+  });
+}
+function openSess(id) {
+  const s = SESS.list.find(x => x.id === id);
+  if (!s) return;
+  SESS.cur = s;
+  CHAT_HIST = s.msgs.slice();
+  openTab("chat");
+  const log = $("chat-log");
+  if (log) {
+    log.innerHTML = "";
+    s.msgs.forEach(m => {
+      const d = document.createElement("div");
+      d.className = "chat-msg " + (m.role === "user" ? "user" : "bot");
+      if (m.role === "bot") d.innerHTML = md(m.content);
+      else d.textContent = m.content;
+      log.appendChild(d);
+    });
+    log.scrollTop = log.scrollHeight;
+  }
+  hideEmpty();
+  drawSess();
+  const cnt = $("pf-cnt");
+  if (cnt) cnt.textContent = s.msgs.length;
+}
+function newSess() {
+  SESS.cur = null;
+  CHAT_HIST = [];
+  openTab("chat");
+  drawSess();
+}
+
 function renderShell() {
   show("scr-app");
   $("cs-nav").innerHTML = NAV.map((n, i) =>
@@ -322,7 +407,14 @@ function renderShell() {
     '<div class="mdl">' + esc((p.onboarding.prefs || {}).model || "") + "</div>" +
     '<div class="st"><i></i>онлайн</div>' +
     '<div class="cnt">реплик в сессии: <b id="pf-cnt">0</b></div>' +
-    "</div>";
+    "</div>" +
+    /* 5-H.7: список сессий чата под профильной карточкой */
+    '<div class="cs-sess-h">сессии</div>' +
+    '<div id="cs-sess" class="sesslist"></div>' +
+    '<button type="button" class="sess-new" id="sess-new">+ новая сессия</button>';
+  sessLoad();
+  drawSess();
+  $("sess-new").onclick = newSess;
   $("cs-logout").onclick = async () => { await api("/api/logout", {}); location.reload(); };
   $("cs-gear").onclick = () => openTab("set");
   $("cs-refresh").onclick = () => openTab(TAB); // перерисовка вкладки без перезагрузки страницы
@@ -422,8 +514,14 @@ function tabChat(p) {
   });
   $("mdl-btn").onclick = e => {
     e.stopPropagation();
-    $("mdl-menu").classList.toggle("open");
+    const menu = $("mdl-menu");
+    menu.classList.remove("up");
+    menu.classList.toggle("open");
     $("mdl-btn").classList.toggle("open");
+    /* 5-H.5: если список не влезает снизу — открываем вверх */
+    const r = menu.getBoundingClientRect();
+    if (menu.classList.contains("open") && r.bottom > window.innerHeight - 8)
+      menu.classList.add("up");
   };
   if (!window.__mdlDocClose) {
     window.__mdlDocClose = true;
@@ -479,6 +577,7 @@ let LAST_MSG = null;
 async function chatTurn(text) {
   addMsg("user", text);
   CHAT_HIST.push({role: "user", content: text});
+  sessTrack("user", text);
   LAST_MSG = text;
   const tp = addTyping();
   try {
@@ -503,6 +602,7 @@ async function chatTurn(text) {
     }
     b.innerHTML = md(acc);
     CHAT_HIST.push({role: "assistant", content: acc});
+    sessTrack("assistant", acc);
   } catch (e) {
     tp.stop();
     const b = addMsg("bot", "⚠️ " + (e.message || e));
@@ -549,17 +649,15 @@ function tabTerm(p) {
   if (!$("tlog").children.length)
     addTMsg("bot", "Терминал работает только с твоим vault. Изменения — после подтверждения. Ядро Моники и чужие данные недоступны.");
   const form = $("tform"), input = $("t-input");
-  /* Полировка-1: фокус → плавное многострочное расширение; blur → возврат если пусто */
+  /* 5-H.3: высота управляется CSS (#t-input / #tbar.tfocus), без JS-конфликта */
   input.addEventListener("focus", () => $("tbar").classList.add("tfocus"));
   input.addEventListener("blur", () => { if (!input.value.trim()) $("tbar").classList.remove("tfocus"); });
-  const resize = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px"; };
-  input.addEventListener("input", resize);
   input.addEventListener("keydown", e => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
   });
   form.onsubmit = e => {
     e.preventDefault(); const t = input.value.trim(); if (!t) return;
-    input.value = ""; resize(); $("tbar").classList.remove("tfocus"); termTurn(t);
+    input.value = ""; $("tbar").classList.remove("tfocus"); termTurn(t);
   };
   /* переключатель Чат ⇄ Редактор — без перерисовки, состояние сохраняется */
   const setView = v => {
@@ -716,15 +814,28 @@ function parseFrontmatter(text) {
 }
 
 function tabWiki(p) {
+  /* 5-H.6: разметка 1:1 из Иванопедии (wiki/index.html):
+     .shell > nav.side (.sgroup) + main.content (.firstHeading + .body) + инфобокс.
+     Классы уже стилизованы в style.css — «обёртка Моники» вокруг них. */
   $("m-body").innerHTML =
     '<div class="wk-open">' +
     '<div class="wk-top"><h2 class="wk-h">Личная вики</h2>' +
     '<button type="button" class="cs-act" id="wk-regen">Обновить вики</button></div>' +
-    '<div class="wk-layout">' +
-    '<div class="wk-side" id="wk-arts"></div>' +
-    '<div id="wk-center"><div id="wk-view" class="body hidden"></div></div>' +
-    '<div class="wk-infobox" id="wk-info"><b>Инфобокс</b>' +
-    '<div class="sub">Открой статью — здесь появятся её метаданные.</div></div>' +
+    '<div class="wk-shell">' +
+    '<nav class="side wk-side" id="wk-arts">' +
+    '<div class="sgroup"><h3>Статьи</h3><ul id="wk-arts-ul"></ul></div>' +
+    '<div class="sgroup"><h3>Инструменты</h3><ul>' +
+    '<li><a href="#" id="wk-nav-search">Поиск по заметкам</a></li>' +
+    '<li><a href="#" id="wk-nav-regen">Обновить вики</a></li></ul></div>' +
+    "</nav>" +
+    '<main class="content wk-content">' +
+    '<div id="wk-home">' +
+    '<h1 class="firstHeading">Личная вики</h1>' +
+    '<div class="body"><p>Это твоя личная энциклопедия — статьи генерируются из твоих заметок.</p>' +
+    '<p class="sub">Новые заметки попадают в очередь автоматически; кнопка «Обновить вики» создаёт статьи через умную модель.</p></div>' +
+    "</div>" +
+    '<div id="wk-view" class="hidden"></div>' +
+    "</main>" +
     "</div>" +
     '<div class="wk-search"><input class="minput" id="wk-q" style="margin:0" placeholder="что ищем в своих заметках?">' +
     '<button class="cs-act primary" id="wk-go">Искать</button></div>' +
@@ -734,36 +845,39 @@ function tabWiki(p) {
     const arts = r.data.articles || [];
     $("wk-regen").textContent = "Обновить вики" +
       (r.data.queued ? " (" + r.data.queued + " в очереди)" : "");
-    $("wk-arts").innerHTML = arts.length ? arts.map(a =>
-      '<div class="wl"><a href="#" class="wl-t" data-p="' + esc(a.path) + '">' + esc(a.title) + "</a>" +
-      '<button class="cs-act" data-open="' + esc(a.path) + '">читать</button></div>').join("")
-      : '<div class="sub">Статей пока нет — новые заметки попадают в очередь, «Обновить вики» создаёт статьи.</div>';
-    $("wk-arts").querySelectorAll(".wl-t,.cs-act[data-open]").forEach(el =>
-      el.onclick = ev => { ev.preventDefault(); openArticle(el.dataset.open || el.dataset.p); });
+    $("wk-arts").innerHTML =
+      '<div class="sgroup"><h3>Статьи</h3><ul>' +
+      (arts.length ? arts.map(a =>
+        '<li><a href="#" data-p="' + esc(a.path) + '">' + esc(a.title) + "</a></li>").join("")
+        : '<li><span class="sub">Статей пока нет — «Обновить вики» создаст их из очереди.</span></li>') +
+      "</ul></div>";
+    $("wk-arts").querySelectorAll("a[data-p]").forEach(el =>
+      el.onclick = ev => { ev.preventDefault(); openArticle(el.dataset.p); });
   };
   const openArticle = async path => {
     const r = await api("/api/wiki/articles", {path: path});
     if (r.data.error) { $("wk-view").innerHTML = '<p style="color:var(--red)">' + esc(r.data.error) + "</p>"; return; }
     const fm = parseFrontmatter(r.data.content);
     const title = fm.meta.title || (path.split("/").pop() || "").replace(/\.md$/, "");
+    /* инфобокс — родная таблица Иванопедии (style.css .infobox, float:right) */
     $("wk-view").innerHTML =
-      '<button type="button" class="cs-act" id="wk-back">← к списку статей</button>' +
-      '<div class="firstHeading">' + esc(title) + "</div>" +
+      '<button type="button" class="cs-act" id="wk-back" style="margin-bottom:10px">← к списку статей</button>' +
+      '<h1 class="firstHeading">' + esc(title) + "</h1>" +
       '<div class="wk-meta">' + esc(fm.meta.created || "") +
       (fm.meta.source ? " · источник: " + esc(fm.meta.source) : "") + "</div>" +
-      md(fm.body);
-    $("wk-info").innerHTML = "<b>Инфобокс</b>" +
-      '<div class="irow"><span>создано</span><span>' + esc(fm.meta.created || "—") + "</span></div>" +
-      '<div class="irow"><span>источник</span><span>' + esc(fm.meta.source || "—") + "</span></div>" +
-      '<div class="irow"><span>теги</span><span>' + esc(fm.meta.tags || "—") + "</span></div>";
+      '<div class="body">' +
+      '<table class="infobox"><caption>' + esc(title) + "</caption>" +
+      "<tr><th>создано</th><td>" + esc(fm.meta.created || "—") + "</td></tr>" +
+      "<tr><th>источник</th><td>" + esc(fm.meta.source || "—") + "</td></tr>" +
+      "<tr><th>теги</th><td>" + esc(fm.meta.tags || "—") + "</td></tr>" +
+      '<tr><td colspan="2" class="ib-foot">статья личной вики Моники</td></tr></table>' +
+      md(fm.body) + "</div>";
+    $("wk-home").classList.add("hidden");
     $("wk-view").classList.remove("hidden");
-    $("wk-arts").classList.add("hidden");
     animTab($("wk-view"));
     $("wk-back").onclick = () => {
       $("wk-view").classList.add("hidden");
-      $("wk-arts").classList.remove("hidden");
-      $("wk-info").innerHTML = "<b>Инфобокс</b>" +
-        '<div class="sub">Открой статью — здесь появятся её метаданные.</div>';
+      $("wk-home").classList.remove("hidden");
     };
   };
   $("wk-regen").onclick = async () => {
