@@ -105,7 +105,10 @@ select.minput{border-radius:var(--r-sm)}
 .cs-term:hover::after,.cs-term:hover::before{opacity:1;transform:translateY(-50%) translateX(0)}
 
 /* баннер закрытого тестирования (пустой чат) — hatnote.amber из Иванопедии */
-.cs-empty{align-items:center;text-align:center;top:24%;gap:18px;transition:.3s}
+/* 5-I фикс: #cs-empty в style.css — pointer-events:none (клик-сквозь оверлей);
+   возвращаем события только баннеру, чтобы работали кнопка «–» и ссылка @sozrelyy */
+.cs-empty{align-items:center;text-align:center;top:24%;gap:18px;transition:.3s;z-index:5}
+.cs-empty .beta{pointer-events:auto}
 .beta{max-width:480px;width:88%;text-align:left;
   padding:12px 15px;border-left:3px solid #d0a04a;border-radius:0 10px 10px 0;
   background:rgba(201,150,63,.10);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
