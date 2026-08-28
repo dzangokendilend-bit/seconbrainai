@@ -874,24 +874,34 @@ function animTab(el) {
 function tabTerm(p) {
   $("m-body").innerHTML =
     '<div class="tgrid">' +
-    '<div class="tpane tpane-tree"><div class="cs-menu-h">vault</div><div id="ttree" class="ttree"></div></div>' +
+    '<div class="tpane tpane-tree"><div class="cs-menu-h">vault' +
+    '<button type="button" class="tt-new" id="tt-new" title="новый файл">+ файл</button></div>' +
+    '<div id="ttree" class="ttree"></div></div>' +
     '<div class="tpane tpane-mid">' +
     '<div class="tmid-switch">' +
     '<button type="button" class="set-tab' + (TERM.view === "chat" ? " on" : "") + '" id="tv-chat">Чат</button>' +
-    '<button type="button" class="set-tab' + (TERM.view === "edit" ? " on" : "") + '" id="tv-edit">Редактор</button></div>' +
+    '<button type="button" class="set-tab' + (TERM.view === "edit" ? " on" : "") + '" id="tv-edit">Редактор</button>' +
+    '<button type="button" class="set-tab' + (TERM.view === "prev" ? " on" : "") + '" id="tv-prev">Превью</button></div>' +
     '<div id="tchat"' + (TERM.view === "chat" ? "" : ' class="hidden"') + '>' +
     '<div id="tlog" class="cs-log"></div>' +
+    '<div class="tchips" id="tchips"></div>' +
     '<div class="cs-bottom"><form id="tform"><div class="cs-inputbar" id="tbar">' +
     '<textarea id="t-input" rows="1"></textarea>' +
     '<button type="submit" class="cs-send" title="Отправить">' + SEND_SVG + "</button>" +
     "</div></form></div></div>" +
     '<div id="teditor"' + (TERM.view === "edit" ? "" : ' class="hidden"') + '>' +
+    '<div class="te-find hidden" id="te-findbar">' +
+    '<input id="te-find" placeholder="найти… (Enter — далее)">' +
+    '<span id="te-fn" class="sub"></span>' +
+    '<button type="button" class="cs-act" id="te-find-close">×</button></div>' +
     '<div class="te-head"><span class="te-tab"><span class="te-dot" id="te-dot"></span>' +
     '<span id="te-file">' + esc(TERM.openFile || "файл не выбран — кликни в дереве слева") + "</span></span>" +
     '<button type="button" class="cs-act primary" id="te-save">Сохранить</button></div>' +
     '<div class="te-wrap"><div class="te-gutter" id="te-gutter"></div>' +
     '<textarea id="te-area" class="te-area" spellcheck="false"></textarea></div>' +
     '<div class="te-status" id="te-status"></div></div>' +
+    '<div id="te-prev" class="body te-prev' + (TERM.view === "prev" ? "" : " hidden") + '">' +
+    (TERM.view === "prev" ? "<p>Открой файл в редакторе — здесь появится превью.</p>" : "") + "</div>" +
     "</div>" +
     '<div class="tpane tpane-log"><div class="cs-menu-h">изменения</div><div id="thist" class="thist"></div></div>' +
     "</div>";
@@ -908,33 +918,117 @@ function tabTerm(p) {
     e.preventDefault(); const t = input.value.trim(); if (!t) return;
     input.value = ""; $("tbar").classList.remove("tfocus"); termTurn(t);
   };
-  /* переключатель Чат ⇄ Редактор — без перерисовки, состояние сохраняется */
+  /* 6-T: рецепты — быстрые запросы к ИИ терминала */
+  const RECIPES = ["создай заметку идеи/план на неделю",
+    "покажи структуру моих заметок",
+    "наведи порядок в заметках — предложи структуру",
+    "сгруппируй заметки по темам"];
+  $("tchips").innerHTML = RECIPES.map(r =>
+    '<button type="button" class="tchip">' + esc(r) + "</button>").join("");
+  $("tchips").querySelectorAll(".tchip").forEach(b =>
+    b.onclick = () => { input.value = b.textContent; input.focus(); input.dispatchEvent(new Event("input")); });
+  /* переключатель Чат ⇄ Редактор ⇄ Превью — без перерисовки */
   const setView = v => {
     TERM.view = v;
-    $("tv-chat").classList.toggle("on", v === "chat");
-    $("tv-edit").classList.toggle("on", v === "edit");
+    ["chat", "edit", "prev"].forEach(x =>
+      $("tv-" + x).classList.toggle("on", v === x));
     $("tchat").classList.toggle("hidden", v !== "chat");
     $("teditor").classList.toggle("hidden", v !== "edit");
+    $("te-prev").classList.toggle("hidden", v !== "prev");
     if (v === "edit" && TERM.openFile) loadEditor();
+    if (v === "prev" && TERM.openFile) renderPreview();
   };
   $("tv-chat").onclick = () => { setView("chat"); animTab($("tchat")); };
   $("tv-edit").onclick = () => { setView("edit"); animTab($("teditor")); };
+  $("tv-prev").onclick = () => { setView("prev"); animTab($("te-prev")); };
   $("te-save").onclick = saveEditor;
   $("te-area").addEventListener("input", () => {
     if (!TERM.dirty) { TERM.dirty = true; $("te-dot").classList.add("on"); }
     updateGutter();
     updateStatus();
   });
-  $("te-area").addEventListener("scroll", syncGutter);
+  $("te-area").addEventListener("scroll", () => { syncGutter(); syncFind(); });
   $("te-area").addEventListener("keyup", () => { updateGutter(); updateStatus(); });
   $("te-area").addEventListener("click", () => { updateGutter(); updateStatus(); });
-  /* 5-I.3: сохранение по Ctrl+S / Cmd+S */
+  /* 5-I.3 + 6-T: Ctrl+S — сохранить, Ctrl+F — найти */
   $("te-area").addEventListener("keydown", e => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); saveEditor(); }
+    const k = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && k === "s") { e.preventDefault(); saveEditor(); }
+    if ((e.ctrlKey || e.metaKey) && k === "f") {
+      e.preventDefault();
+      $("te-findbar").classList.remove("hidden");
+      $("te-find").focus();
+      $("te-find").select();
+    }
+    if (e.key === "Escape" && !$("te-findbar").classList.contains("hidden")) {
+      $("te-findbar").classList.add("hidden");
+      $("te-find").value = ""; $("te-fn").textContent = "";
+    }
   });
+  /* 6-T: find-бар — последовательный поиск с выделением */
+  let findIdx = -1;
+  const findNext = back => {
+    const q = $("te-find").value;
+    if (!q) { $("te-fn").textContent = ""; return; }
+    const v = $("te-area").value;
+    const low = v.toLowerCase(), ql = q.toLowerCase();
+    let i;
+    if (back) {
+      i = low.lastIndexOf(ql, Math.max(0, findIdx - 1));
+      if (i < 0) i = low.lastIndexOf(ql);
+    } else {
+      i = low.indexOf(ql, findIdx + 1);
+      if (i < 0) i = low.indexOf(ql);
+    }
+    if (i < 0) { $("te-fn").textContent = "не найдено"; return; }
+    findIdx = i;
+    $("te-area").focus();
+    $("te-area").setSelectionRange(i, i + q.length);
+    const line = v.slice(0, i).split("\n").length;
+    $("te-area").scrollTop = Math.max(0, (line - 4) * 20);
+    syncGutter();
+    const total = low.split(ql).length - 1;
+    const num = low.slice(0, i).split(ql).length;
+    $("te-fn").textContent = num + " / " + total;
+  };
+  $("te-find").addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); findNext(e.shiftKey); }
+    if (e.key === "Escape") { $("te-findbar").classList.add("hidden"); $("te-area").focus(); }
+  });
+  $("te-find").addEventListener("input", () => { findIdx = -1; findNext(false); });
+  $("te-find-close").onclick = () => { $("te-findbar").classList.add("hidden"); $("te-area").focus(); };
+  /* 6-T: новый файл из дерева */
+  $("tt-new").onclick = async () => {
+    const path = prompt("Путь нового файла (например: заметки/идеи.md):");
+    if (!path || !path.trim()) return;
+    const title = (path.split("/").pop() || "").replace(/\.md$/, "") || "Без названия";
+    const r = await api("/api/vault/write", {path: path.trim(),
+      content: "---\ntitle: " + title + "\ncreated: " +
+        new Date().toISOString().slice(0, 10) + "\n---\n\n# " + title + "\n\n"});
+    if (r.data.error) { addTMsg("bot", "⚠️ " + r.data.error); return; }
+    TERM.openFile = r.data.path;
+    drawTree();
+    drawHist();
+    setView("edit");
+    loadEditor();
+  };
   drawTree();
   drawHist();
 }
+
+/* 6-T: markdown-превью открытого файла */
+async function renderPreview() {
+  const box = $("te-prev");
+  if (!box || !TERM.openFile) return;
+  const r = await api("/api/vault/read", {path: TERM.openFile});
+  if (r.data.error) { box.innerHTML = '<p style="color:var(--red)">' + esc(r.data.error) + "</p>"; return; }
+  const fm = parseFrontmatter(r.data.content);
+  box.innerHTML = '<h1 class="firstHeading">' +
+    esc(fm.meta.title || (TERM.openFile.split("/").pop() || "").replace(/\.md$/, "")) + "</h1>" +
+    '<div class="wk-meta">' + esc(fm.meta.created || "") +
+    (fm.meta.tags ? " · теги: " + esc(fm.meta.tags) : "") + "</div>" + md(fm.body);
+}
+function syncFind() { /* заготовка: gutter уже синхронен через syncGutter */ }
 
 /* Полировка-1: gutter с номерами строк, синхронный скролл, текущая строка */
 function updateGutter() {
@@ -1044,12 +1138,49 @@ async function drawHist() {
     (h.to ? " → " + esc(h.to) : "") +
     (mut[h.op] ? '<button type="button" class="cs-act" data-id="' + h.id + '">откатить</button>' : "") +
     "</div>").join("") : '<div class="sub">изменений пока нет</div>';
-  box.querySelectorAll(".cs-act[data-id]").forEach(b => b.onclick = async () => {
-    const r2 = await api("/api/vault/undo", {id: b.dataset.id});
+  box.querySelectorAll(".cs-act[data-id]").forEach(b => b.onclick = () => {
+    const rec = items.find(x => x.id === b.dataset.id);
+    if (rec) undoModal(rec);
+  });
+}
+
+/* 6-T: модалка отката с превью «сейчас → после» */
+function undoModal(rec) {
+  const ov = document.createElement("div");
+  ov.className = "modal-ov";
+  ov.innerHTML = '<div class="modal"><h3>Откатить операцию?</h3>' +
+    '<div class="sub">' + esc(rec.op) + " · " + esc(rec.path || "") +
+    (rec.to ? " → " + esc(rec.to) : "") + "</div>" +
+    '<div id="ud-body" class="sub" style="margin-top:10px">загрузка…</div>' +
+    '<div class="row"><button class="mbtn" id="ud-cancel">Отмена</button>' +
+    '<button class="mbtn acc" id="ud-go">Подтвердить откат</button></div></div>';
+  document.body.appendChild(ov);
+  const body = ov.querySelector("#ud-body");
+  (async () => {
+    if (rec.op === "edit_note") {
+      const cur = await api("/api/vault/read", {path: rec.path});
+      const curText = cur.data.error ? "(файл отсутствует)" : (cur.data.content || "").slice(0, 1200);
+      const prevText = rec.prev === null ? "— файл будет удалён —" : (rec.prev || "").slice(0, 1200);
+      body.classList.remove("sub");
+      body.innerHTML = '<div class="undo-diff">' +
+        '<div class="ud-col"><div class="ud-h">сейчас</div><pre>' + esc(curText) + "</pre></div>" +
+        '<div class="ud-col"><div class="ud-h">после отката</div><pre>' + esc(prevText) + "</pre></div></div>";
+    } else if (rec.op === "create_note") {
+      body.innerHTML = '<div class="warn">⚠️ Файл <b>' + esc(rec.path) +
+        "</b> будет удалён. Восстановить его после этого будет нельзя.</div>";
+    } else {
+      body.innerHTML = "<p>Вернуть: <b>" + esc(rec.to || "") + "</b> → <b>" + esc(rec.path || "") + "</b></p>";
+    }
+  })();
+  ov.querySelector("#ud-cancel").onclick = () => ov.remove();
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.querySelector("#ud-go").onclick = async () => {
+    const r2 = await api("/api/vault/undo", {id: rec.id});
+    ov.remove();
     addTMsg("bot", r2.data.message || ("⚠️ " + (r2.data.error || "ошибка отката")));
     drawTree();
     drawHist();
-  });
+  };
 }
 
 function addTMsg(role, text) {
