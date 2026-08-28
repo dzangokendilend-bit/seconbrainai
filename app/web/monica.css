@@ -2,6 +2,12 @@
    Все токены и базовые компоненты — оттуда. */
 .hidden{display:none!important}
 
+/* 5-I.1: длинный контент вкладок (настройки и др.) скроллится внутри панели */
+#m-body{overflow-y:auto}
+/* 5-I.5: ссылка на автора в бета-баннере */
+.beta a{color:var(--acc);text-decoration:underline;text-underline-offset:2px}
+.beta a:hover{filter:brightness(1.15)}
+
 /* онбординг: стеклянная карточка мастера */
 #scr-wizard{display:flex;align-items:center;justify-content:center;min-height:100vh}
 .mcard{position:relative;z-index:1;max-width:600px;width:100%;margin:auto;
@@ -153,13 +159,14 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 .wglyph svg{width:20px;height:20px;color:var(--link)}
 .mhint{font-size:11.5px;color:var(--muted);margin:-8px 0 10px}
 
-/* ── виток F + 5-H.6: личная вики — разметка Иванопедии (.shell/.side/.sgroup/
-   .content/.firstHeading/.body/.infobox берутся из style.css 1:1) ── */
+/* ── виток F + 5-H.6 + 5-I.4: личная вики — разметка Иванопедии
+   (.shell/.side/.sgroup/.content/.firstHeading/.body/.infobox/.topbar из style.css 1:1) ── */
 .wk-open{animation:wkopen .35s ease;width:100%}
 @keyframes wkopen{from{opacity:0;transform:scale(.965)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion: reduce){.wk-open{animation:none}}
-.wk-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
-.wk-h{font-family:var(--serif);font-size:24px;margin:0}
+.wk-topbar{position:static;margin-bottom:14px}
+.wk-topbar .searchbox{flex:1;max-width:520px}
+.wk-topbar .btn-black{cursor:pointer;font-family:var(--ui)}
 .wk-shell{padding:0;max-width:none;gap:16px}
 .wk-shell .side{position:static;width:225px;max-height:64vh;overflow-y:auto}
 .wk-shell .content{max-width:none}
@@ -216,6 +223,21 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
   color:var(--text);font-family:ui-monospace,Consolas,monospace;font-size:13px;
   line-height:1.55;padding:12px 14px;white-space:pre-wrap}
 .te-area::selection{background:rgba(143,180,255,.28)}
+/* 5-I.3: статус-строка редактора (путь · Ln/Col · UTF-8) */
+.te-status{flex:none;border-top:1px solid var(--border);background:rgba(0,0,0,.28);
+  padding:5px 12px;font-family:var(--ui);font-size:11px;color:var(--muted)}
+/* 5-I.3: папки дерева в стиле Obsidian */
+.tdir{margin:1px 0}
+.tdir summary{display:flex;align-items:center;gap:7px;padding:5px 6px;border-radius:8px;
+  cursor:pointer;list-style:none;font-family:var(--ui);font-size:12px;color:var(--text);word-break:break-all}
+.tdir summary::-webkit-details-marker{display:none}
+.tdir summary::before{content:'▸';flex:none;width:10px;color:var(--muted);transition:transform .15s}
+.tdir[open] > summary::before{transform:rotate(90deg)}
+.tdir summary:hover{background:rgba(255,255,255,.07)}
+.tdir summary svg{width:15px;height:15px;flex:none;color:var(--acc)}
+.tdir .tfile{padding-left:22px}
+.tfile svg{width:14px;height:14px;flex:none;opacity:.55}
+.tfile{display:flex;align-items:center;gap:7px}
 
 /* ── 5-H.1: переход между модулями, Вариант A — fade-доминанта ──
    Смещение 10px, 0.22s ease-out, применяется только к #m-body (контент),

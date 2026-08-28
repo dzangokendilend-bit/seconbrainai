@@ -97,6 +97,8 @@ const consoleErrors = [], badResponses = [];
   ok("полировка: переход вкладки (.tab-in)",
     await page.$eval("#m-body", el => el.classList.contains("tab-in")).catch(() => false));
   ok("полировка: gutter редактора на месте", await page.$("#te-gutter"));
+  ok("5-I: дерево Obsidian — папки .tdir", await page.$("#ttree .tdir, #ttree .tfile"));
+  ok("5-I: статус-бар редактора", await page.$("#te-status"));
   await new Promise(r => setTimeout(r, 500));
   const treeFiles = await page.$$eval("#ttree .tfile", els => els.length).catch(() => 0);
   ok("терминал 2.0: дерево vault загружено (файлов " + treeFiles + ")", treeFiles >= 1);
@@ -115,8 +117,8 @@ const consoleErrors = [], badResponses = [];
   }
   await tab("wiki", "#wk-q", "поиск по заметкам");
   /* Фаза 5-F: личная вики */
-  ok("вики: заголовок «Личная вики» и кнопка обновления",
-    (await page.$(".wk-h")) && (await page.$("#wk-regen")));
+  ok("вики: topbar Иванопедии с поиском и обновлением",
+    (await page.$(".wk-topbar .searchbox")) && (await page.$("#wk-regen")));
   await new Promise(r => setTimeout(r, 500));
   ok("вики: секция статей отрисована", await page.$("#wk-arts"));
   ok("вики: анимация открытия (.wk-open)", await page.$("#m-body .wk-open"));
@@ -146,6 +148,8 @@ const consoleErrors = [], badResponses = [];
   ok("чат: CSS-каретка typewriter", await page.$("#m-title .caret"));
   const bstyle = await page.$eval(".beta", el => getComputedStyle(el).borderLeftColor).catch(() => "");
   ok("чат: баннер — hatnote.amber Иванопедии (" + bstyle + ")", bstyle === "rgb(208, 160, 74)");
+  ok("5-I: бета-баннер — тестовый режим и ссылка на автора @sozrelyy",
+    await page.$('.beta a[href="https://t.me/sozrelyy"]'));
   const greet = await page.$eval("#chat-log", el => el.textContent).catch(() => "");
   ok("чат: фиксированного приветствия нет", !/Привет, .+! Я Моника/.test(greet));
   /* Фаза 5-B: быстрый переключатель модели в чате */

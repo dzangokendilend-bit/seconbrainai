@@ -416,8 +416,8 @@ function renderShell() {
   drawSess();
   $("sess-new").onclick = newSess;
   $("cs-logout").onclick = async () => { await api("/api/logout", {}); location.reload(); };
+  /* 5-I: солнце открывает настройки и подсвечивает вкладку в правом меню */
   $("cs-gear").onclick = () => openTab("set");
-  $("cs-refresh").onclick = () => openTab(TAB); // перерисовка вкладки без перезагрузки страницы
   openTab("chat");
 }
 
@@ -460,6 +460,8 @@ function openTab(tab) {
   /* Полировка-1: терминал расширяет каркас, остальные вкладки — обычная ширина */
   const shell = document.querySelector(".cs");
   if (shell) shell.classList.toggle("term-wide", tab === "term");
+  /* 5-I: активная вкладка в правом меню синхронизируется всегда (солнце/сессии) */
+  document.querySelectorAll(".cs-navitem").forEach(x => x.classList.toggle("on", x.dataset.tab === tab));
   ({chat: tabChat, term: tabTerm, wiki: tabWiki, tg: tabTg, ana: tabAna, set: tabSet})[tab](ME);
   /* Полировка-1: slide+fade переход между модулями (в духе .wz-in) */
   const body = $("m-body");
@@ -479,8 +481,9 @@ function tabChat(p) {
     '<div id="chat-log" class="cs-log"></div>' +
     '<div id="cs-empty" class="cs-empty"><div class="cs-empty-t">С чего начнём?</div>' +
     '<div class="beta"><h3><i>🔒</i>Закрытое тестирование</h3>' +
-    "<p>Моника — закрытая бета для друзей и бета-тестеров. Часть функций ещё в разработке, возможны странности в работе.</p>" +
-    "<p>Твои заметки и данные принадлежат только тебе. Нашёл баг или есть идея — расскажи автору.</p></div></div>" +
+    "<p>Моника работает в тестовом режиме: это закрытая бета для друзей и бета-тестеров, часть функций ещё в разработке, возможны странности.</p>" +
+    '<p>Нашёл баг или есть идея — пиши автору в Telegram: <a href="https://t.me/sozrelyy" target="_blank" rel="noopener">@sozrelyy</a>. Баг-репорты и предложения очень помогают.</p>' +
+    "<p>Твои заметки и данные принадлежат только тебе.</p></div></div>" +
     '<div class="cs-bottom"><form id="chat-form"><div class="cs-inputbar">' +
     '<span class="cs-att" title="скоро: изображения"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M21 15.5 16.5 11 7 19"/></svg></span>' +
     '<span class="cs-att" title="скоро: файлы"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.05 12.25 20.2a5.5 5.5 0 0 1-7.78-7.78l8.49-8.48a3.67 3.67 0 0 1 5.18 5.18l-8.48 8.49a1.83 1.83 0 0 1-2.6-2.6l7.79-7.78"/></svg></span>' +
@@ -642,7 +645,8 @@ function tabTerm(p) {
     '<span id="te-file">' + esc(TERM.openFile || "файл не выбран — кликни в дереве слева") + "</span></span>" +
     '<button type="button" class="cs-act primary" id="te-save">Сохранить</button></div>' +
     '<div class="te-wrap"><div class="te-gutter" id="te-gutter"></div>' +
-    '<textarea id="te-area" class="te-area" spellcheck="false"></textarea></div></div>' +
+    '<textarea id="te-area" class="te-area" spellcheck="false"></textarea></div>' +
+    '<div class="te-status" id="te-status"></div></div>' +
     "</div>" +
     '<div class="tpane tpane-log"><div class="cs-menu-h">изменения</div><div id="thist" class="thist"></div></div>' +
     "</div>";
@@ -674,10 +678,15 @@ function tabTerm(p) {
   $("te-area").addEventListener("input", () => {
     if (!TERM.dirty) { TERM.dirty = true; $("te-dot").classList.add("on"); }
     updateGutter();
+    updateStatus();
   });
   $("te-area").addEventListener("scroll", syncGutter);
-  $("te-area").addEventListener("keyup", updateGutter);
-  $("te-area").addEventListener("click", updateGutter);
+  $("te-area").addEventListener("keyup", () => { updateGutter(); updateStatus(); });
+  $("te-area").addEventListener("click", () => { updateGutter(); updateStatus(); });
+  /* 5-I.3: сохранение по Ctrl+S / Cmd+S */
+  $("te-area").addEventListener("keydown", e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); saveEditor(); }
+  });
   drawTree();
   drawHist();
 }
@@ -699,15 +708,40 @@ function syncGutter() {
   if (ta && g) g.scrollTop = ta.scrollTop;
 }
 
+/* 5-I.3: дерево в стиле Obsidian — иерархия папок со сворачиванием */
+function buildTree(paths) {
+  const root = {dirs: {}, files: []};
+  (paths || []).forEach(p => {
+    const parts = p.split("/");
+    let node = root;
+    for (let i = 0; i < parts.length - 1; i++)
+      node = node.dirs[parts[i]] || (node.dirs[parts[i]] = {dirs: {}, files: []});
+    node.files.push({name: parts[parts.length - 1], path: p});
+  });
+  return root;
+}
+const FOLDER_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+const FILE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>';
+
+function renderTreeNode(node, out) {
+  Object.keys(node.dirs).sort().forEach(name => {
+    out.push('<details class="tdir" open><summary>' + FOLDER_SVG + esc(name) + "</summary>");
+    renderTreeNode(node.dirs[name], out);
+    out.push("</details>");
+  });
+  node.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(f => {
+    out.push('<button type="button" class="tfile' + (f.path === TERM.openFile ? " sel" : "") +
+      '" data-p="' + esc(f.path) + '">' + FILE_SVG + esc(f.name) + "</button>");
+  });
+}
+
 async function drawTree() {
   const box = $("ttree");
   if (!box) return;
   const r = await api("/api/vault/tree", {});
-  const tree = r.data.tree || [];
-  box.innerHTML = tree.length ? tree.map(f =>
-    '<button type="button" class="tfile' + (f === TERM.openFile ? " sel" : "") +
-    '" data-p="' + esc(f) + '">' + esc(f) + "</button>").join("")
-    : '<div class="sub">vault пуст</div>';
+  const out = [];
+  renderTreeNode(buildTree(r.data.tree || []), out);
+  box.innerHTML = out.length ? out.join("") : '<div class="sub">vault пуст</div>';
   box.querySelectorAll(".tfile").forEach(b => b.onclick = () => {
     TERM.openFile = b.dataset.p;
     box.querySelectorAll(".tfile").forEach(x => x.classList.toggle("sel", x === b));
@@ -724,11 +758,21 @@ async function loadEditor() {
   if (!TERM.openFile || !$("te-area")) return;
   $("te-file").textContent = TERM.openFile;
   const r = await api("/api/vault/read", {path: TERM.openFile});
-  if (r.data.error) { $("te-area").value = ""; $("te-file").textContent = "⚠️ " + r.data.error; updateGutter(); return; }
+  if (r.data.error) { $("te-area").value = ""; $("te-file").textContent = "⚠️ " + r.data.error; updateGutter(); updateStatus(); return; }
   $("te-area").value = r.data.content;
   TERM.dirty = false;
   $("te-dot").classList.remove("on");
   updateGutter();
+  updateStatus();
+}
+
+/* 5-I.3: статус-строка редактора — путь, Ln/Col, кодировка */
+function updateStatus() {
+  const ta = $("te-area"), st = $("te-status");
+  if (!ta || !st) return;
+  const upto = ta.value.slice(0, ta.selectionStart).split("\n");
+  st.textContent = (TERM.openFile || "—") + " · Ln " + upto.length +
+    ", Col " + (upto[upto.length - 1].length + 1) + " · UTF-8";
 }
 
 async function saveEditor() {
@@ -819,8 +863,20 @@ function tabWiki(p) {
      Классы уже стилизованы в style.css — «обёртка Моники» вокруг них. */
   $("m-body").innerHTML =
     '<div class="wk-open">' +
-    '<div class="wk-top"><h2 class="wk-h">Личная вики</h2>' +
-    '<button type="button" class="cs-act" id="wk-regen">Обновить вики</button></div>' +
+    /* 5-I.4: topbar как в wiki/index.html Иванопедии */
+    '<header class="topbar wk-topbar">' +
+    '<a class="brand"><svg class="globe" viewBox="0 0 64 64" aria-hidden="true">' +
+    '<defs><clipPath id="wkc"><circle cx="32" cy="32" r="27"/></clipPath></defs>' +
+    '<circle cx="32" cy="32" r="27" class="g-fill"/>' +
+    '<g clip-path="url(#wkc)" class="g-line"><circle cx="32" cy="32" r="27"/>' +
+    '<ellipse cx="32" cy="32" rx="10" ry="27"/><ellipse cx="32" cy="32" rx="19" ry="27"/>' +
+    '<line x1="5" y1="32" x2="59" y2="32"/><line x1="9" y1="18" x2="55" y2="18"/>' +
+    '<line x1="9" y1="46" x2="55" y2="46"/></g>' +
+    '<g class="g-type"><text x="32" y="40" text-anchor="middle">М</text></g></svg>' +
+    '<span class="brand-t"><b>Личная вики</b><small>твоя энциклопедия</small></span></a>' +
+    '<div class="searchbox"><input id="wk-q" type="search" placeholder="Поиск по заметкам" autocomplete="off"></div>' +
+    '<div class="topcta"><button type="button" class="btn-black" id="wk-regen" title="Сгенерировать статьи из очереди">⟳ Обновить</button></div>' +
+    "</header>" +
     '<div class="wk-shell">' +
     '<nav class="side wk-side" id="wk-arts">' +
     '<div class="sgroup"><h3>Статьи</h3><ul id="wk-arts-ul"></ul></div>' +
@@ -837,9 +893,7 @@ function tabWiki(p) {
     '<div id="wk-view" class="hidden"></div>' +
     "</main>" +
     "</div>" +
-    '<div class="wk-search"><input class="minput" id="wk-q" style="margin:0" placeholder="что ищем в своих заметках?">' +
-    '<button class="cs-act primary" id="wk-go">Искать</button></div>' +
-    '<div id="wk-res" class="body"></div></div>';
+    '<div id="wk-res" class="body" style="margin-top:12px"></div></div>';
   const drawArts = async () => {
     const r = await api("/api/wiki/articles", {});
     const arts = r.data.articles || [];
@@ -906,7 +960,6 @@ function tabWiki(p) {
       });
     });
   };
-  $("wk-go").onclick = doSearch;
   $("wk-q").onkeydown = e => { if (e.key === "Enter") doSearch(); };
   drawArts();
 }
