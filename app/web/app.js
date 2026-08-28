@@ -874,9 +874,10 @@ function animTab(el) {
 function tabTerm(p) {
   $("m-body").innerHTML =
     '<div class="tgrid">' +
-    '<div class="tpane tpane-tree"><div class="cs-menu-h">vault' +
-    '<button type="button" class="tt-new" id="tt-new" title="новый файл">+ файл</button></div>' +
-    '<div id="ttree" class="ttree"></div></div>' +
+    '<div class="tpane tpane-tree" id="ttree-pane"><div class="cs-menu-h">vault' +
+    '<button type="button" class="tt-new" id="tt-new" title="создать">＋</button></div>' +
+    '<div id="ttree" class="ttree"></div>' +
+    '<div class="tt-hint">перетащи файлы сюда — они попадут в vault</div></div>' +
     '<div class="tpane tpane-mid">' +
     '<div class="tmid-switch">' +
     '<button type="button" class="set-tab' + (TERM.view === "chat" ? " on" : "") + '" id="tv-chat">Чат</button>' +
@@ -997,23 +998,108 @@ function tabTerm(p) {
   });
   $("te-find").addEventListener("input", () => { findIdx = -1; findNext(false); });
   $("te-find-close").onclick = () => { $("te-findbar").classList.add("hidden"); $("te-area").focus(); };
-  /* 6-T: новый файл из дерева */
-  $("tt-new").onclick = async () => {
-    const path = prompt("Путь нового файла (например: заметки/идеи.md):");
-    if (!path || !path.trim()) return;
-    const title = (path.split("/").pop() || "").replace(/\.md$/, "") || "Без названия";
-    const r = await api("/api/vault/write", {path: path.trim(),
-      content: "---\ntitle: " + title + "\ncreated: " +
-        new Date().toISOString().slice(0, 10) + "\n---\n\n# " + title + "\n\n"});
-    if (r.data.error) { addTMsg("bot", "⚠️ " + r.data.error); return; }
-    TERM.openFile = r.data.path;
-    drawTree();
-    drawHist();
-    setView("edit");
-    loadEditor();
+  /* 6-I: меню создания файла/папки */
+  $("tt-new").onclick = e => {
+    e.stopPropagation();
+    closeTreeMenu();
+    const m = document.createElement("div");
+    m.className = "sessmenu treemenu";
+    m.innerHTML = '<button data-a="file">Новый файл</button>' +
+      '<button data-a="dir">Новая папка</button>';
+    document.body.appendChild(m);
+    const r = e.currentTarget.getBoundingClientRect();
+    m.style.top = Math.min(r.bottom + 4, window.innerHeight - m.offsetHeight - 8) + "px";
+    m.style.left = r.left + "px";
+    m.onclick = ev => {
+      const a = ev.target.dataset.a;
+      closeTreeMenu();
+      if (a) newItemModal(a);
+    };
+    setTimeout(() => document.addEventListener("click", closeTreeMenu, {once: true}), 0);
   };
+  /* 6-I: drag&drop файлов в дерево */
+  const pane = $("ttree-pane");
+  pane.addEventListener("dragover", e => { e.preventDefault(); pane.classList.add("dragover"); });
+  pane.addEventListener("dragleave", () => pane.classList.remove("dragover"));
+  pane.addEventListener("drop", e => {
+    e.preventDefault();
+    pane.classList.remove("dragover");
+    handleDrop(e.dataTransfer.files, e.target);
+  });
   drawTree();
   drawHist();
+}
+
+function closeTreeMenu() {
+  const m = document.querySelector(".treemenu");
+  if (m) m.remove();
+}
+
+const TEXT_EXT = /\.(md|txt|markdown|json|csv|log|html|css|js|py|yml|yaml|ts|ini|cfg)$/i;
+
+/* 6-I: импорт перетащенных файлов (текстовые) в vault */
+async function handleDrop(files, target) {
+  const dirEl = target && target.closest ? target.closest(".tdir") : null;
+  const folder = dirEl ? (dirEl.dataset.dir || "") : "";
+  const list = Array.from(files || []).slice(0, 10);
+  if (!list.length) return;
+  for (const f of list) {
+    if (!TEXT_EXT.test(f.name) && !(f.type || "").startsWith("text/")) {
+      addTMsg("bot", "⚠️ «" + f.name + "» пропущен: пока поддерживаются только текстовые файлы.");
+      continue;
+    }
+    const text = await f.text();
+    const path = (folder ? folder + "/" : "") + f.name;
+    const r = await api("/api/vault/write", {path: path, content: text.slice(0, 100_000)});
+    if (r.data.error) addTMsg("bot", "⚠️ " + f.name + ": " + r.data.error);
+    else addTMsg("bot", "✅ импортировано: " + r.data.path);
+  }
+  drawTree();
+  drawHist();
+}
+
+/* 6-I: мини-модалка создания файла/папки */
+function newItemModal(type) {
+  const isFile = type === "file";
+  const ov = document.createElement("div");
+  ov.className = "modal-ov";
+  ov.innerHTML = '<div class="modal"><h3>' + (isFile ? "Новый файл" : "Новая папка") + "</h3>" +
+    "<label>" + (isFile ? "Путь (можно с папкой: заметки/имя.md)" : "Имя папки") + "</label>" +
+    '<input class="minput" id="nm-name" placeholder="' +
+    (isFile ? "заметки/имя.md" : "новая папка") + '">' +
+    '<div class="row"><button class="mbtn" id="nm-cancel">Отмена</button>' +
+    '<button class="mbtn acc" id="nm-go">Создать</button></div></div>';
+  document.body.appendChild(ov);
+  const inp = ov.querySelector("#nm-name");
+  inp.focus();
+  ov.querySelector("#nm-cancel").onclick = () => ov.remove();
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  const create = async () => {
+    const raw = inp.value.trim();
+    if (!raw) { inp.style.borderColor = "var(--red)"; return; }
+    const path = isFile ? (raw.endsWith(".md") ? raw : raw + ".md") : raw + "/Черновик.md";
+    const title = (path.split("/").pop() || "").replace(/\.md$/, "");
+    const r = await api("/api/vault/write", {path: path,
+      content: "---\ntitle: " + title + "\ncreated: " +
+        new Date().toISOString().slice(0, 10) + "\n---\n\n# " + title + "\n\n"});
+    if (r.data.error) { inp.style.borderColor = "var(--red)"; return; }
+    ov.remove();
+    TERM.openFile = isFile ? r.data.path : null;
+    drawTree();
+    drawHist();
+    if (isFile) { setViewEdit(); loadEditor(); }
+  };
+  ov.querySelector("#nm-go").onclick = create;
+  inp.addEventListener("keydown", e => { if (e.key === "Enter") create(); });
+}
+function setViewEdit() {
+  if ($("tv-edit")) {
+    $("tv-chat").classList.remove("on");
+    $("tv-edit").classList.add("on");
+    $("tchat").classList.add("hidden");
+    $("teditor").classList.remove("hidden");
+    TERM.view = "edit";
+  }
 }
 
 /* 6-T: markdown-превью открытого файла */
@@ -1063,10 +1149,12 @@ const FOLDER_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 const FILE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>';
 const PIN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5M9 3h6l1 7 3 3H5l3-3z"/></svg>';
 
-function renderTreeNode(node, out) {
+function renderTreeNode(node, out, prefix) {
   Object.keys(node.dirs).sort().forEach(name => {
-    out.push('<details class="tdir" open><summary>' + FOLDER_SVG + esc(name) + "</summary>");
-    renderTreeNode(node.dirs[name], out);
+    const dirPath = prefix ? prefix + "/" + name : name;
+    out.push('<details class="tdir" open data-dir="' + esc(dirPath) + '"><summary>' +
+      FOLDER_SVG + esc(name) + "</summary>");
+    renderTreeNode(node.dirs[name], out, dirPath);
     out.push("</details>");
   });
   node.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(f => {
@@ -1080,7 +1168,7 @@ async function drawTree() {
   if (!box) return;
   const r = await api("/api/vault/tree", {});
   const out = [];
-  renderTreeNode(buildTree(r.data.tree || []), out);
+  renderTreeNode(buildTree(r.data.tree || []), out, "");
   box.innerHTML = out.length ? out.join("") : '<div class="sub">vault пуст</div>';
   box.querySelectorAll(".tfile").forEach(b => b.onclick = () => {
     TERM.openFile = b.dataset.p;

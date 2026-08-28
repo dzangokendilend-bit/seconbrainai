@@ -250,7 +250,14 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 /* 5-I.3: статус-строка редактора (путь · Ln/Col · UTF-8) */
 .te-status{flex:none;border-top:1px solid var(--border);background:rgba(0,0,0,.28);
   padding:5px 12px;font-family:var(--ui);font-size:11px;color:var(--muted)}
-/* 5-I.3: папки дерева в стиле Obsidian */
+/* 5-I.3 + 6-I: папки дерева в стиле Obsidian + создание + drag&drop */
+.tt-new{float:right;border:none;background:none;color:var(--acc);cursor:pointer;
+  font-family:var(--ui);font-size:14px;line-height:1;padding:0 5px;border-radius:6px}
+.tt-new:hover{background:rgba(143,180,255,.12)}
+.tt-hint{font-size:10.5px;color:var(--muted);padding:8px 2px 0;
+  border-top:1px dashed rgba(255,255,255,.08);margin-top:8px}
+.tpane-tree.dragover{border-color:var(--acc);background:rgba(143,180,255,.06)}
+.treemenu{min-width:150px}
 .tdir{margin:1px 0}
 .tdir summary{display:flex;align-items:center;gap:7px;padding:5px 6px;border-radius:8px;
   cursor:pointer;list-style:none;font-family:var(--ui);font-size:12px;color:var(--text);word-break:break-all}
