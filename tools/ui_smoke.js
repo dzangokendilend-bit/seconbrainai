@@ -90,8 +90,13 @@ const consoleErrors = [], badResponses = [];
     ok("вкладка «" + name + "»: " + what, await page.$(sel));
   }
   await tab("term", "#tform", "форма терминала");
-  /* Фаза 5-E: Терминал 2.0 — три панели */
+  /* Фаза 5-E + Полировка-1: Терминал 2.0 — три панели */
   ok("терминал 2.0: сетка из трёх панелей", await page.$(".tgrid .tpane-tree") && await page.$(".tgrid .tpane-log"));
+  ok("полировка: каркас расширен (.cs.term-wide)",
+    await page.$eval(".cs", el => el.classList.contains("term-wide")).catch(() => false));
+  ok("полировка: переход вкладки (.tab-in)",
+    await page.$eval("#m-body", el => el.classList.contains("tab-in")).catch(() => false));
+  ok("полировка: gutter редактора на месте", await page.$("#te-gutter"));
   await new Promise(r => setTimeout(r, 500));
   const treeFiles = await page.$$eval("#ttree .tfile", els => els.length).catch(() => 0);
   ok("терминал 2.0: дерево vault загружено (файлов " + treeFiles + ")", treeFiles >= 1);
@@ -104,6 +109,8 @@ const consoleErrors = [], badResponses = [];
       await page.$eval("#teditor", el => !el.classList.contains("hidden")).catch(() => false));
     ok("терминал 2.0: содержимое подгружено",
       await page.$eval("#te-area", el => el.value.length > 0).catch(() => false));
+    const gutterNums = await page.$$eval("#te-gutter div", els => els.length).catch(() => 0);
+    ok("полировка: номера строк в gutter (факт " + gutterNums + ")", gutterNums >= 1);
     await page.click("#tv-chat");
   }
   await tab("wiki", "#wk-q", "поиск по заметкам");
@@ -113,6 +120,8 @@ const consoleErrors = [], badResponses = [];
   await new Promise(r => setTimeout(r, 500));
   ok("вики: секция статей отрисована", await page.$("#wk-arts"));
   ok("вики: анимация открытия (.wk-open)", await page.$("#m-body .wk-open"));
+  ok("полировка: инфобокс статьи", await page.$("#wk-info"));
+  ok("полировка: трёхзонная раскладка вики", await page.$(".wk-layout .wk-side"));
   await tab("tg", "#tg-body", "статус бота");
   await tab("ana", ".stat-grid", "сводка аналитики");
   await tab("set", ".set-tab.on", "вкладки настроек");

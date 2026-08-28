@@ -153,19 +153,34 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 .wglyph svg{width:20px;height:20px;color:var(--link)}
 .mhint{font-size:11.5px;color:var(--muted);margin:-8px 0 10px}
 
-/* ── виток F: личная вики — анимация открытия и список статей ── */
+/* ── виток F + Полировка-1: личная вики в стиле Иванопедии ── */
 .wk-open{animation:wkopen .35s ease;width:100%}
 @keyframes wkopen{from{opacity:0;transform:scale(.965)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion: reduce){.wk-open{animation:none}}
 .wk-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
 .wk-h{font-family:var(--serif);font-size:24px;margin:0}
-.wl-list .wl{display:flex;justify-content:space-between;align-items:center;gap:10px}
-.wl-list .wl-t{cursor:pointer}
+.wk-layout{display:grid;grid-template-columns:230px minmax(0,1fr) 240px;gap:14px;width:100%}
+.wk-side{border:1px solid var(--border);border-radius:var(--r-sm);
+  background:rgba(255,255,255,.03);padding:8px;max-height:66vh;overflow-y:auto}
+.wk-side .wl{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px}
+.wk-side .wl-t{cursor:pointer}
+.wk-meta{color:var(--muted);font-size:12px;margin:-4px 0 14px;
+  padding-bottom:10px;border-bottom:1px solid var(--border)}
 .firstHeading{font-family:var(--serif);font-size:26px;margin:14px 0 10px;
   border-bottom:1px solid var(--border);padding-bottom:8px}
+.wk-infobox{align-self:start;border:1px solid var(--border);border-radius:var(--r-sm);
+  background:rgba(0,0,0,.25);padding:12px;font-size:12px}
+.wk-infobox b{display:block;font-family:var(--serif);font-size:14px;margin-bottom:8px}
+.wk-infobox .irow{display:flex;justify-content:space-between;gap:8px;padding:5px 0;
+  border-bottom:1px dashed rgba(255,255,255,.08);word-break:break-all}
+.wk-infobox .irow span:first-child{color:var(--muted);flex:none}
+@media (max-width:1100px){.wk-layout{grid-template-columns:1fr}}
 
-/* ── виток E: Терминал 2.0 — три панели ── */
-.tgrid{display:grid;grid-template-columns:220px minmax(0,1fr) 260px;gap:12px;flex:1;min-height:0;width:100%}
+/* ── виток E + Полировка-1: Терминал 2.0 — три панели ── */
+/* терминал расширяет каркас: центральная панель доминирует, меню уезжает правее */
+.cs.term-wide{max-width:1400px}
+.tgrid{display:grid;grid-template-columns:240px minmax(0,1fr) 300px;gap:14px;
+  flex:1;min-height:0;width:100%;padding-left:22px}
 .tpane{border:1px solid var(--border);border-radius:var(--r-sm);background:rgba(255,255,255,.03);
   padding:10px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
 .tpane .cs-menu-h{margin-bottom:8px}
@@ -176,11 +191,35 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 .tfile.sel{background:rgba(143,180,255,.10);color:var(--acc)}
 .tmid-switch{display:flex;gap:6px;margin-bottom:8px}
 #tchat{display:flex;flex-direction:column;flex:1;min-height:0}
-.te-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
-.te-area{flex:1;min-height:200px;resize:none;background:rgba(0,0,0,.25);border:1px solid var(--border);
-  border-radius:var(--r-sm);color:var(--text);font-family:ui-monospace,Consolas,monospace;
-  font-size:13px;line-height:1.55;padding:12px;outline:none}
-.te-area:focus{border-color:rgba(255,255,255,.35)}
+/* Полировка-1: чат-поле терминала — фокус → плавное многострочное расширение */
+#t-input{transition:min-height .22s ease}
+#tbar.tfocus #t-input{min-height:120px}
+@media (prefers-reduced-motion: reduce){#t-input{transition:none}}
+
+/* Полировка-1: редактор в духе VS Code, но в палитре Моники */
+.te-head{display:flex;justify-content:space-between;align-items:center;gap:8px;
+  border:1px solid var(--border);border-radius:10px 10px 0 0;
+  background:rgba(0,0,0,.28);padding:7px 10px}
+.te-tab{display:inline-flex;align-items:center;gap:8px;font-family:var(--ui);font-size:12.5px;color:var(--text)}
+.te-dot{width:7px;height:7px;border-radius:50%;background:transparent;flex:none;transition:.15s}
+.te-dot.on{background:#d0a04a;box-shadow:0 0 6px rgba(208,160,74,.7)}
+.te-wrap{flex:1;display:flex;min-height:0;border:1px solid var(--border);border-top:none;
+  border-radius:0 0 10px 10px;background:rgba(0,0,0,.32);overflow:hidden}
+.te-gutter{flex:none;width:48px;overflow:hidden;padding:12px 8px 12px 0;text-align:right;
+  font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.55;
+  color:rgba(255,255,255,.22);border-right:1px solid rgba(255,255,255,.07);
+  user-select:none;background:rgba(0,0,0,.18)}
+.te-gutter div{height:1.55em}
+.te-gutter div.cur{color:var(--acc);text-shadow:0 0 8px rgba(143,180,255,.55)}
+.te-area{flex:1;resize:none;background:transparent;border:none;outline:none;caret-color:var(--acc);
+  color:var(--text);font-family:ui-monospace,Consolas,monospace;font-size:13px;
+  line-height:1.55;padding:12px 14px;white-space:pre-wrap}
+.te-area::selection{background:rgba(143,180,255,.28)}
+
+/* Полировка-1: slide+fade переход между модулями (в духе .wz-in) */
+.tab-in{animation:tabin .28s ease}
+@keyframes tabin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){.tab-in{animation:none}}
 .thist-row{padding:7px 4px;border-bottom:1px solid rgba(255,255,255,.06);
   display:flex;flex-wrap:wrap;gap:5px;align-items:center;word-break:break-all}
 .thist-t{color:var(--muted);font-size:10.5px;flex:none;width:100%}

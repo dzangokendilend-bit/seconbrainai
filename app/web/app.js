@@ -365,7 +365,15 @@ function openTab(tab) {
   TAB = tab;
   setTitleTab(tab);
   $("m-sub").textContent = new Date().toLocaleDateString("ru-RU", {day: "numeric", month: "long", weekday: "long"});
+  /* Полировка-1: терминал расширяет каркас, остальные вкладки — обычная ширина */
+  const shell = document.querySelector(".cs");
+  if (shell) shell.classList.toggle("term-wide", tab === "term");
   ({chat: tabChat, term: tabTerm, wiki: tabWiki, tg: tabTg, ana: tabAna, set: tabSet})[tab](ME);
+  /* Полировка-1: slide+fade переход между модулями (в духе .wz-in) */
+  const body = $("m-body");
+  body.classList.remove("tab-in");
+  void body.offsetWidth;
+  body.classList.add("tab-in");
 }
 
 /* ── чат: лента, пустой экран с подсказками, стриминг, thinking-фразы ── */
@@ -505,8 +513,15 @@ async function chatTurn(text) {
   }
 }
 
-/* ── терминал 2.0: дерево / чат⇄редактор / лог изменений (Фаза 5-E) ── */
-let TERM = {view: "chat", openFile: null};
+/* ── терминал 2.0: дерево / чат⇄редактор / лог изменений (Фаза 5-E + Полировка-1) ── */
+let TERM = {view: "chat", openFile: null, dirty: false};
+
+function animTab(el) {
+  if (!el) return;
+  el.classList.remove("tab-in");
+  void el.offsetWidth;
+  el.classList.add("tab-in");
+}
 
 function tabTerm(p) {
   $("m-body").innerHTML =
@@ -518,27 +533,34 @@ function tabTerm(p) {
     '<button type="button" class="set-tab' + (TERM.view === "edit" ? " on" : "") + '" id="tv-edit">Редактор</button></div>' +
     '<div id="tchat"' + (TERM.view === "chat" ? "" : ' class="hidden"') + '>' +
     '<div id="tlog" class="cs-log"></div>' +
-    '<div class="cs-bottom"><form id="tform"><div class="cs-inputbar">' +
-    '<textarea id="t-input" rows="1" placeholder="например: создай заметку идеи/план.md"></textarea>' +
+    '<div class="cs-bottom"><form id="tform"><div class="cs-inputbar" id="tbar">' +
+    '<textarea id="t-input" rows="1"></textarea>' +
     '<button type="submit" class="cs-send" title="Отправить">' + SEND_SVG + "</button>" +
     "</div></form></div></div>" +
     '<div id="teditor"' + (TERM.view === "edit" ? "" : ' class="hidden"') + '>' +
-    '<div class="te-head"><span id="te-file" class="sub">' +
-    esc(TERM.openFile || "файл не выбран — кликни в дереве слева") + "</span>" +
+    '<div class="te-head"><span class="te-tab"><span class="te-dot" id="te-dot"></span>' +
+    '<span id="te-file">' + esc(TERM.openFile || "файл не выбран — кликни в дереве слева") + "</span></span>" +
     '<button type="button" class="cs-act primary" id="te-save">Сохранить</button></div>' +
-    '<textarea id="te-area" class="te-area" spellcheck="false" placeholder="содержимое .md файла"></textarea></div>' +
+    '<div class="te-wrap"><div class="te-gutter" id="te-gutter"></div>' +
+    '<textarea id="te-area" class="te-area" spellcheck="false"></textarea></div></div>' +
     "</div>" +
     '<div class="tpane tpane-log"><div class="cs-menu-h">изменения</div><div id="thist" class="thist"></div></div>' +
     "</div>";
   if (!$("tlog").children.length)
     addTMsg("bot", "Терминал работает только с твоим vault. Изменения — после подтверждения. Ядро Моники и чужие данные недоступны.");
   const form = $("tform"), input = $("t-input");
+  /* Полировка-1: фокус → плавное многострочное расширение; blur → возврат если пусто */
+  input.addEventListener("focus", () => $("tbar").classList.add("tfocus"));
+  input.addEventListener("blur", () => { if (!input.value.trim()) $("tbar").classList.remove("tfocus"); });
   const resize = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px"; };
   input.addEventListener("input", resize);
   input.addEventListener("keydown", e => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
   });
-  form.onsubmit = e => { e.preventDefault(); const t = input.value.trim(); if (!t) return; input.value = ""; resize(); termTurn(t); };
+  form.onsubmit = e => {
+    e.preventDefault(); const t = input.value.trim(); if (!t) return;
+    input.value = ""; resize(); $("tbar").classList.remove("tfocus"); termTurn(t);
+  };
   /* переключатель Чат ⇄ Редактор — без перерисовки, состояние сохраняется */
   const setView = v => {
     TERM.view = v;
@@ -548,11 +570,35 @@ function tabTerm(p) {
     $("teditor").classList.toggle("hidden", v !== "edit");
     if (v === "edit" && TERM.openFile) loadEditor();
   };
-  $("tv-chat").onclick = () => setView("chat");
-  $("tv-edit").onclick = () => setView("edit");
+  $("tv-chat").onclick = () => { setView("chat"); animTab($("tchat")); };
+  $("tv-edit").onclick = () => { setView("edit"); animTab($("teditor")); };
   $("te-save").onclick = saveEditor;
+  $("te-area").addEventListener("input", () => {
+    if (!TERM.dirty) { TERM.dirty = true; $("te-dot").classList.add("on"); }
+    updateGutter();
+  });
+  $("te-area").addEventListener("scroll", syncGutter);
+  $("te-area").addEventListener("keyup", updateGutter);
+  $("te-area").addEventListener("click", updateGutter);
   drawTree();
   drawHist();
+}
+
+/* Полировка-1: gutter с номерами строк, синхронный скролл, текущая строка */
+function updateGutter() {
+  const ta = $("te-area"), g = $("te-gutter");
+  if (!ta || !g) return;
+  const lines = Math.max(ta.value.split("\n").length, 1);
+  const curLine = ta.value.slice(0, ta.selectionStart).split("\n").length;
+  let html = "";
+  for (let i = 1; i <= lines; i++)
+    html += "<div" + (i === curLine ? ' class="cur"' : "") + ">" + i + "</div>";
+  g.innerHTML = html;
+  syncGutter();
+}
+function syncGutter() {
+  const ta = $("te-area"), g = $("te-gutter");
+  if (ta && g) g.scrollTop = ta.scrollTop;
 }
 
 async function drawTree() {
@@ -580,8 +626,11 @@ async function loadEditor() {
   if (!TERM.openFile || !$("te-area")) return;
   $("te-file").textContent = TERM.openFile;
   const r = await api("/api/vault/read", {path: TERM.openFile});
-  if (r.data.error) { $("te-area").value = ""; $("te-file").textContent = "⚠️ " + r.data.error; return; }
+  if (r.data.error) { $("te-area").value = ""; $("te-file").textContent = "⚠️ " + r.data.error; updateGutter(); return; }
   $("te-area").value = r.data.content;
+  TERM.dirty = false;
+  $("te-dot").classList.remove("on");
+  updateGutter();
 }
 
 async function saveEditor() {
@@ -589,6 +638,8 @@ async function saveEditor() {
   const r = await api("/api/vault/write", {path: TERM.openFile, content: $("te-area").value});
   if (r.data.error) { $("te-file").textContent = "⚠️ " + r.data.error; return; }
   $("te-file").textContent = "сохранено: " + r.data.path;
+  TERM.dirty = false;
+  $("te-dot").classList.remove("on");
   drawTree();
   drawHist();
 }
@@ -653,14 +704,28 @@ async function termTurn(text) {
   }
 }
 
-/* ── Википедия: личная вики + поиск и выжимки в стиле Иванопедии (Фаза 5-F) ── */
+/* ── Википедия: личная вики в стиле Иванопедии (Фаза 5-F + Полировка-1) ── */
+function parseFrontmatter(text) {
+  const meta = {};
+  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+  if (m) m[1].split(/\r?\n/).forEach(line => {
+    const kv = line.match(/^(\w+):\s*(.*)$/);
+    if (kv) meta[kv[1]] = kv[2].replace(/^\[/, "").replace(/\]$/, "").trim();
+  });
+  return {meta: meta, body: text.slice(m ? m[0].length : 0)};
+}
+
 function tabWiki(p) {
   $("m-body").innerHTML =
     '<div class="wk-open">' +
     '<div class="wk-top"><h2 class="wk-h">Личная вики</h2>' +
     '<button type="button" class="cs-act" id="wk-regen">Обновить вики</button></div>' +
-    '<div id="wk-arts" class="wl-list"></div>' +
-    '<div id="wk-view" class="body hidden"></div>' +
+    '<div class="wk-layout">' +
+    '<div class="wk-side" id="wk-arts"></div>' +
+    '<div id="wk-center"><div id="wk-view" class="body hidden"></div></div>' +
+    '<div class="wk-infobox" id="wk-info"><b>Инфобокс</b>' +
+    '<div class="sub">Открой статью — здесь появятся её метаданные.</div></div>' +
+    "</div>" +
     '<div class="wk-search"><input class="minput" id="wk-q" style="margin:0" placeholder="что ищем в своих заметках?">' +
     '<button class="cs-act primary" id="wk-go">Искать</button></div>' +
     '<div id="wk-res" class="body"></div></div>';
@@ -679,15 +744,26 @@ function tabWiki(p) {
   const openArticle = async path => {
     const r = await api("/api/wiki/articles", {path: path});
     if (r.data.error) { $("wk-view").innerHTML = '<p style="color:var(--red)">' + esc(r.data.error) + "</p>"; return; }
+    const fm = parseFrontmatter(r.data.content);
+    const title = fm.meta.title || (path.split("/").pop() || "").replace(/\.md$/, "");
     $("wk-view").innerHTML =
       '<button type="button" class="cs-act" id="wk-back">← к списку статей</button>' +
-      '<div class="firstHeading">' + esc((path.split("/").pop() || "").replace(/\.md$/, "")) + "</div>" +
-      md(r.data.content.replace(/^---[\s\S]*?---\n*/, ""));
+      '<div class="firstHeading">' + esc(title) + "</div>" +
+      '<div class="wk-meta">' + esc(fm.meta.created || "") +
+      (fm.meta.source ? " · источник: " + esc(fm.meta.source) : "") + "</div>" +
+      md(fm.body);
+    $("wk-info").innerHTML = "<b>Инфобокс</b>" +
+      '<div class="irow"><span>создано</span><span>' + esc(fm.meta.created || "—") + "</span></div>" +
+      '<div class="irow"><span>источник</span><span>' + esc(fm.meta.source || "—") + "</span></div>" +
+      '<div class="irow"><span>теги</span><span>' + esc(fm.meta.tags || "—") + "</span></div>";
     $("wk-view").classList.remove("hidden");
     $("wk-arts").classList.add("hidden");
+    animTab($("wk-view"));
     $("wk-back").onclick = () => {
       $("wk-view").classList.add("hidden");
       $("wk-arts").classList.remove("hidden");
+      $("wk-info").innerHTML = "<b>Инфобокс</b>" +
+        '<div class="sub">Открой статью — здесь появятся её метаданные.</div>';
     };
   };
   $("wk-regen").onclick = async () => {
