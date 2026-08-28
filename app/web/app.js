@@ -381,9 +381,7 @@ function drawProj() {
     const id = +row.dataset.id;
     row.onclick = e => {
       if (e.target.dataset.del) return;
-      PROJ.filter = (PROJ.filter === id) ? null : id;
-      drawProj();
-      drawSess();
+      openProjPage(id); /* 6-S2: клик по проекту открывает его страницу */
     };
     const del = row.querySelector(".px");
     if (del) del.onclick = e => {
@@ -399,18 +397,90 @@ function drawProj() {
     };
   });
 }
-function createProj() {
-  const name = prompt("Название проекта:");
-  if (!name || !name.trim()) return;
-  const emoji = prompt("Эмодзи/символ проекта (можно пропустить):", "📁") || "📁";
-  const ci = parseInt(prompt("Цвет: 0 синий, 1 фиолет, 2 золото, 3 зелёный, 4 красный, 5 серый", "0"), 10);
-  const color = PROJ_COLORS[isNaN(ci) ? 0 : Math.max(0, Math.min(5, ci))];
-  const instruction = prompt("Общая инструкция проекта для Моники (например: «мы учим английский — отвечай частью на английском»). Можно пропустить:", "") || "";
-  PROJ.list.push({id: Date.now(), name: name.trim().slice(0, 40),
-    emoji: emoji.trim().slice(0, 4) || "📁", color: color,
-    instruction: instruction.trim().slice(0, 500)});
-  projSave();
-  drawProj();
+
+/* 6-S2: модальное окно создания/настройки проекта (вместо browser-prompt) */
+function projModal(p, onSaved) {
+  closeSessMenu();
+  const isNew = !p;
+  const ov = document.createElement("div");
+  ov.className = "modal-ov";
+  ov.innerHTML =
+    '<div class="modal"><h3>' + (isNew ? "Новый проект" : "Настройки проекта") + "</h3>" +
+    '<label>Название</label><input class="minput" id="pm-name" value="' + esc(p ? p.name : "") + '">' +
+    '<label>Эмодзи / символ</label><input class="minput" id="pm-emoji" style="width:90px;text-align:center" value="' + esc(p ? p.emoji : "📁") + '">' +
+    "<label>Цвет</label><div class=\"swatches\">" +
+    PROJ_COLORS.map(c => '<span class="swatch' + ((p ? p.color : PROJ_COLORS[0]) === c ? " on" : "") +
+      '" data-c="' + c + '" style="background:' + c + '"></span>').join("") + "</div>" +
+    '<label>Общая инструкция для Моники</label>' +
+    '<textarea class="minput" id="pm-instr" rows="3" style="height:auto;line-height:1.45" ' +
+    'placeholder="например: мы учим английский — отвечай частью на английском">' + esc(p ? p.instruction : "") + "</textarea>" +
+    '<div class="row"><button class="mbtn" id="pm-cancel">Отмена</button>' +
+    '<button class="mbtn acc" id="pm-save">' + (isNew ? "Создать" : "Сохранить") + "</button></div></div>";
+  document.body.appendChild(ov);
+  let color = p ? p.color : PROJ_COLORS[0];
+  ov.querySelectorAll(".swatch").forEach(s => s.onclick = () => {
+    color = s.dataset.c;
+    ov.querySelectorAll(".swatch").forEach(x => x.classList.toggle("on", x === s));
+  });
+  ov.querySelector("#pm-cancel").onclick = () => ov.remove();
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.querySelector("#pm-save").onclick = () => {
+    const nameEl = ov.querySelector("#pm-name");
+    const name = nameEl.value.trim();
+    if (!name) { nameEl.style.borderColor = "var(--red)"; return; }
+    const rec = {name: name.slice(0, 40),
+      emoji: ov.querySelector("#pm-emoji").value.trim().slice(0, 4) || "📁",
+      color: color,
+      instruction: ov.querySelector("#pm-instr").value.trim().slice(0, 500)};
+    if (isNew) PROJ.list.push(Object.assign({id: Date.now()}, rec));
+    else Object.assign(p, rec);
+    projSave();
+    ov.remove();
+    drawProj();
+    if (onSaved) onSaved();
+  };
+}
+
+/* 6-S2: страница проекта — карточки сессий (как в ChatGPT) */
+function openProjPage(id) {
+  const p = projById(id);
+  if (!p) return;
+  TAB = "proj";
+  document.querySelectorAll(".cs-navitem").forEach(x => x.classList.remove("on"));
+  const shell = document.querySelector(".cs");
+  if (shell) shell.classList.remove("term-wide");
+  const sessions = SESS.list.filter(s => s.projId === id)
+    .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.id - a.id);
+  $("m-title").textContent = p.name;
+  $("m-sub").textContent = "проект · сессий: " + sessions.length;
+  $("m-body").innerHTML =
+    '<div class="tab-in">' +
+    '<div class="pc-head">' +
+    '<span class="pc-emoji" style="border-color:' + p.color + ';color:' + p.color + '">' + esc(p.emoji || "📁") + "</span>" +
+    '<div class="pc-name"><h2 class="wk-h" style="margin:0">' + esc(p.name) + "</h2>" +
+    (p.instruction ? '<div class="sub">' + esc(p.instruction) + "</div>" : "") + "</div>" +
+    '<button type="button" class="cs-act" id="pp-settings">Настройки проекта</button>' +
+    '<button type="button" class="cs-act" id="pp-back">← к чату</button></div>' +
+    '<div class="pcard-grid">' +
+    '<button type="button" class="pcard new" id="pp-new"><span class="plus">＋</span>Новая сессия</button>' +
+    sessions.map(s =>
+      '<button type="button" class="pcard" data-id="' + s.id + '">' +
+      (s.pinned ? '<span class="pc-pin" title="закреплена">📌</span>' : "") +
+      '<span class="t">' + esc(s.title || "Новая сессия") + "</span>" +
+      '<span class="d">' + (s.started ? new Date(s.started).toLocaleDateString("ru-RU", {day: "numeric", month: "long"}) : "") +
+      " · реплик: " + s.msgs.length + "</span></button>").join("") +
+    "</div></div>";
+  $("pp-back").onclick = () => openTab("chat");
+  $("pp-settings").onclick = () => projModal(p, () => openProjPage(id));
+  $("pp-new").onclick = () => {
+    const f = PROJ.filter;
+    PROJ.filter = id;
+    newSess();
+    PROJ.filter = f;
+    if (SESS.cur) openSess(SESS.cur.id);
+  };
+  $("m-body").querySelectorAll(".pcard[data-id]").forEach(c =>
+    c.onclick = () => openSess(+c.dataset.id));
 }
 function closeSessMenu() {
   const m = document.querySelector(".sessmenu");
@@ -483,6 +553,7 @@ function drawSess() {
       (s.pinned ? " pinned" : "") + '" data-id="' + s.id + '">' +
       (p ? '<span class="pdot" style="background:' + p.color + '" title="проект: ' +
         esc(p.name) + '"></span>' : "") +
+      (s.pinned ? '<span class="spin2" title="закреплена">' + PIN_SVG + "</span>" : "") +
       '<span class="st">' + esc(s.title || "Новая сессия") + "</span>" +
       '<span class="smore" data-menu="' + s.id + '" title="действия">⋯</span></div>';
   }).join("") :
@@ -571,7 +642,7 @@ function renderShell() {
   drawProj();
   $("sess-q").addEventListener("input", drawSess);
   $("sess-new").onclick = newSess;
-  $("proj-new").onclick = createProj;
+  $("proj-new").onclick = () => projModal(null);
   $("cs-logout").onclick = async () => { await api("/api/logout", {}); location.reload(); };
   /* 5-I: солнце открывает настройки и подсвечивает вкладку в правом меню */
   $("cs-gear").onclick = () => openTab("set");
@@ -896,6 +967,7 @@ function buildTree(paths) {
 }
 const FOLDER_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
 const FILE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>';
+const PIN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5M9 3h6l1 7 3 3H5l3-3z"/></svg>';
 
 function renderTreeNode(node, out) {
   Object.keys(node.dirs).sort().forEach(name => {
