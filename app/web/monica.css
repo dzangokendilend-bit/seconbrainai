@@ -162,6 +162,32 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 .wglyph svg{width:20px;height:20px;color:var(--link)}
 .mhint{font-size:11.5px;color:var(--muted);margin:-8px 0 10px}
 
+/* ── 6-O: онбординг 2.0 — слайдер-презентация ── */
+.hero-slider{display:flex;flex-direction:column;min-height:430px}
+.hslide{display:none;flex:1;flex-direction:column;align-items:center;
+  text-align:center;gap:8px}
+.hslide.on{display:flex;animation:tabin .25s ease-out}
+.hero-dots{display:flex;gap:8px;justify-content:center;margin-top:16px}
+.hdot{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.18);
+  cursor:pointer;transition:.15s}
+.hdot.on{background:var(--acc);box-shadow:0 0 8px rgba(143,180,255,.5)}
+.hcards{display:grid;grid-template-columns:1fr 1fr;gap:10px;width:100%;
+  max-width:470px;margin:8px 0 12px}
+.hcard{display:flex;flex-direction:column;gap:4px;align-items:flex-start;
+  text-align:left;border:1px solid var(--border);border-radius:var(--r-sm);
+  background:rgba(255,255,255,.035);padding:12px}
+.hcard .hico{width:20px;height:20px;color:var(--acc)}
+.hcard .hico svg{width:100%;height:100%}
+.hcard b{font-size:13px}
+.hdemo{width:100%;max-width:450px;border:1px solid var(--border);
+  border-radius:var(--r-sm);background:rgba(0,0,0,.25);padding:10px;text-align:left}
+.hdemo-h{font-size:10px;letter-spacing:.6px;text-transform:uppercase;
+  color:var(--muted);margin-bottom:6px}
+.hdemo-log{min-height:74px;display:flex;flex-direction:column;gap:4px}
+.hdemo-msg{padding:6px 11px;border-radius:10px;font-size:12.5px;max-width:88%}
+.hdemo-msg.user{background:rgba(143,180,255,.14);align-self:flex-end}
+.hdemo-msg.bot{background:rgba(255,255,255,.05);align-self:flex-start}
+
 /* ── виток F + 5-H.6 + 5-I.4: личная вики — разметка Иванопедии
    (.shell/.side/.sgroup/.content/.firstHeading/.body/.infobox/.topbar из style.css 1:1) ── */
 .wk-open{animation:wkopen .35s ease;width:100%}

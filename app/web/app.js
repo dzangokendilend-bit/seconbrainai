@@ -167,29 +167,111 @@ function wBind(next) {
   if ($("w-back")) $("w-back").onclick = () => { W.step--; wDraftSave(); renderW(); };
 }
 
+/* ── 6-O: онбординг 2.0 — слайдер-презентация продукта ── */
+const HZ = {slide: 0, timer: null, demoDone: false};
+
+function heroGlobeSvg() {
+  return '<svg class="globe" viewBox="0 0 64 64" aria-hidden="true">' +
+    '<defs><clipPath id="wch"><circle cx="32" cy="32" r="27"/></clipPath></defs>' +
+    '<circle cx="32" cy="32" r="27" class="g-fill"/>' +
+    '<g clip-path="url(#wch)" class="g-line"><circle cx="32" cy="32" r="27"/>' +
+    '<ellipse cx="32" cy="32" rx="10" ry="27"/><ellipse cx="32" cy="32" rx="19" ry="27"/>' +
+    '<line x1="5" y1="32" x2="59" y2="32"/><line x1="9" y1="18" x2="55" y2="18"/>' +
+    '<line x1="9" y1="46" x2="55" y2="46"/></g>' +
+    '<g class="g-type"><text x="32" y="40" text-anchor="middle">М</text></g></svg>';
+}
+function hcard(icon, title, text) {
+  return '<div class="hcard"><span class="hico">' + ICO[icon] + "</span>" +
+    "<b>" + esc(title) + '</b><span class="sub">' + esc(text) + "</span></div>";
+}
+function renderHeroSlider(wz) {
+  wz.innerHTML =
+    '<div class="hero-slider">' +
+    '<div class="hslide' + (HZ.slide === 0 ? " on" : "") + '" data-s="0">' +
+    '<div class="login-brand">' + heroGlobeSvg() + "</div>" +
+    "<h2>Привет! Это Моника</h2>" +
+    '<p class="sub">Твоё личное ИИ-пространство: заметки, чат, модули и терминал — в одном спокойном месте.</p>' +
+    '<div class="wz-back-row"><button class="mbtn" id="w-exit">← на главную</button>' +
+    '<button class="mbtn acc" id="hz-next">Знакомство →</button></div></div>' +
+    '<div class="hslide' + (HZ.slide === 1 ? " on" : "") + '" data-s="1">' +
+    "<h2>Что она умеет</h2>" +
+    '<div class="hcards">' +
+    hcard("chat", "Чат", "отвечает, помнит контекст, ведёт сессии") +
+    hcard("term", "Терминал", "наводит порядок в твоих заметках") +
+    hcard("wiki", "Вики", "сама собирает энциклопедию из заметок") +
+    hcard("tg", "Модули", "Telegram-бот, аналитика, поиск") +
+    "</div>" +
+    '<div class="hdemo"><div class="hdemo-h">живой пример</div><div class="hdemo-log" id="hdemo-log"></div></div>' +
+    '<div class="wz-back-row"><button class="mbtn" id="hz-prev">← Назад</button>' +
+    '<button class="mbtn acc" id="hz-next2">Далее →</button></div></div>' +
+    '<div class="hslide' + (HZ.slide === 2 ? " on" : "") + '" data-s="2">' +
+    '<span class="beta-tag">🔒 закрытое тестирование · тестовый режим</span>' +
+    "<h2>Осталось пару шагов</h2>" +
+    '<p class="sub">Соберём аккаунт: расскажешь, откуда ты, выберешь модель и модули, подключишь ключи API.</p>' +
+    '<p class="sub">Нашёл баг или есть идея — пиши автору в Telegram: <a href="https://t.me/sozrelyy" target="_blank" rel="noopener">@sozrelyy</a>.</p>' +
+    '<div class="wz-back-row"><button class="mbtn" id="hz-prev2">← Назад</button>' +
+    '<button class="mbtn acc" id="w-next">Начать регистрацию →</button></div></div>' +
+    "</div>" +
+    '<div class="hero-dots">' + [0, 1, 2].map(i =>
+      '<span class="hdot' + (HZ.slide === i ? " on" : "") + '" data-d="' + i + '"></span>').join("") + "</div>";
+  /* 6.4: возврат на главную (черновик сохраняется) */
+  $("w-exit").onclick = () => { wDraftSave(); renderLogin(); };
+  const go = n => {
+    HZ.slide = n;
+    wz.querySelectorAll(".hslide").forEach(s => s.classList.toggle("on", +s.dataset.s === n));
+    wz.querySelectorAll(".hdot").forEach(d => d.classList.toggle("on", +d.dataset.d === n));
+    if (n === 1) setTimeout(heroDemoRun, 350);
+  };
+  $("hz-next").onclick = () => { go(1); };
+  $("hz-next2").onclick = () => { go(2); };
+  $("hz-prev").onclick = () => { go(0); };
+  $("hz-prev2").onclick = () => { go(1); };
+  /* слайд 3 → шаг 2 визарда */
+  $("w-next").onclick = () => { W.step = 2; wDraftSave(); renderW(); };
+  wz.querySelectorAll(".hdot").forEach(d =>
+    d.onclick = () => go(+d.dataset.d));
+  /* автопрокрутка первого слайда, если пользователь не начал взаимодействие */
+  if (HZ.timer) { clearTimeout(HZ.timer); HZ.timer = null; }
+  if (HZ.slide === 0 &&
+      !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    HZ.timer = setTimeout(() => {
+      if (W.step === 1 && HZ.slide === 0) go(1);
+    }, 4500);
+  }
+  if (HZ.slide === 1) setTimeout(heroDemoRun, 350);
+}
+function heroDemoRun() {
+  const log = $("hdemo-log");
+  if (!log || HZ.demoDone) return;
+  HZ.demoDone = true;
+  const script = [
+    ["user", "Моника, что у меня в заметках на этой неделе?"],
+    ["bot", "План на неделю, 3 встречи и заметка про флот 📋 Хочешь — соберу краткую сводку."]
+  ];
+  let i = 0;
+  const next = () => {
+    if (i >= script.length || !$("hdemo-log")) return;
+    const role = script[i][0], text = script[i][1];
+    const d = document.createElement("div");
+    d.className = "hdemo-msg " + role;
+    $("hdemo-log").appendChild(d);
+    let k = 0;
+    const t = setInterval(() => {
+      const log = $("hdemo-log");
+      if (!log || !d.isConnected) { clearInterval(t); return; } /* ушли со слайда */
+      d.textContent = text.slice(0, ++k);
+      log.scrollTop = log.scrollHeight;
+      if (k >= text.length) { clearInterval(t); i++; setTimeout(next, 450); }
+    }, 22);
+  };
+  next();
+}
+
 function renderW() {
   const wz = $("wz");
   if (W.step === 1) {
-    /* Фаза 5-C: полноэкранный герой как у логина (глобус + сериф + закрытая бета) */
-    wz.innerHTML =
-      '<div class="whero">' +
-      '<div class="login-brand"><svg class="globe" viewBox="0 0 64 64" aria-hidden="true">' +
-      '<defs><clipPath id="wc"><circle cx="32" cy="32" r="27"/></clipPath></defs>' +
-      '<circle cx="32" cy="32" r="27" class="g-fill"/>' +
-      '<g clip-path="url(#wc)" class="g-line"><circle cx="32" cy="32" r="27"/>' +
-      '<ellipse cx="32" cy="32" rx="10" ry="27"/><ellipse cx="32" cy="32" rx="19" ry="27"/>' +
-      '<line x1="5" y1="32" x2="59" y2="32"/><line x1="9" y1="18" x2="55" y2="18"/>' +
-      '<line x1="9" y1="46" x2="55" y2="46"/></g>' +
-      '<g class="g-type"><text x="32" y="40" text-anchor="middle">М</text></g></svg></div>' +
-      "<h2>Привет! Это Моника</h2>" +
-      "<p>Твоё личное ИИ-пространство: заметки, чат, модули и терминал — в одном спокойном месте.</p>" +
-      '<p class="sub">За 7 коротких шагов соберём аккаунт: расскажешь, откуда ты, как будешь пользоваться, выберешь модули и подключишь ключи моделей.</p>' +
-      '<span class="beta-tag">🔒 закрытое тестирование · доступ для друзей и бета-тестеров</span>' +
-      '<div class="wz-back-row"><button class="mbtn" id="w-exit">← на главную</button>' +
-      '<button class="mbtn acc" id="w-next">Начать →</button></div></div>';
-    /* 6.4: возврат на главную (черновик сохраняется — можно продолжить позже) */
-    $("w-exit").onclick = () => { wDraftSave(); renderLogin(); };
-    $("w-next").onclick = () => { W.step = 2; wDraftSave(); renderW(); };
+    /* 6-O: онбординг 2.0 — слайдер-презентация продукта */
+    renderHeroSlider(wz);
   } else if (W.step === 2) {
     wz.innerHTML = wHead("Пара вопросов") +
       '<label>Откуда вы узнали о нас?</label><div id="w-src"></div>' +

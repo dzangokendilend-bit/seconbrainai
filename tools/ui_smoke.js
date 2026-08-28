@@ -52,14 +52,22 @@ const consoleErrors = [], badResponses = [];
   await page.click("#l-reg");
   await page.waitForSelector("#scr-wizard:not(.hidden)", {timeout: 5000}).catch(() => {});
   /* renderW срабатывает после fetch /api/models — ждём именно герой */
-  await page.waitForSelector("#scr-wizard .whero", {timeout: 5000}).catch(() => {});
-  ok("онбординг: герой-экран показан", await page.$("#scr-wizard .whero"));
-  ok("онбординг: глобус в герое", await page.$(".whero .globe"));
-  ok("онбординг: метка закрытой беты", await page.$(".whero .beta-tag"));
-  ok("онбординг: кнопка «Начать»", await page.$(".whero #w-next"));
+  await page.waitForSelector("#scr-wizard .hero-slider", {timeout: 5000}).catch(() => {});
+  ok("онбординг: слайдер-презентация показан", await page.$("#scr-wizard .hero-slider"));
+  ok("онбординг: глобус на слайде", await page.$(".hero-slider .globe"));
+  ok("онбординг: точки-пагинация (3)", (await page.$$(".hdot")).length === 3);
+  ok("онбординг: кнопка «Знакомство»", await page.$("#hz-next"));
   ok("онбординг: анимация шага (.wz-in)",
     await page.$eval("#wz", el => el.classList.contains("wz-in")).catch(() => false));
-  await page.click(".whero #w-next");
+  await page.click("#hz-next");
+  await new Promise(r => setTimeout(r, 700));
+  ok("онбординг: слайд возможностей с демо-чатом",
+    (await page.$(".hcards")) && (await page.$("#hdemo-log")));
+  await page.click("#hz-next2");
+  await new Promise(r => setTimeout(r, 300));
+  ok("онбординг: слайд беты + «Начать регистрацию»",
+    (await page.$(".beta-tag")) && (await page.$("#w-next")));
+  await page.click("#w-next");
   await new Promise(r => setTimeout(r, 400));
   ok("онбординг: шаг 2 — глиф и прогресс-бар",
     (await page.$("#wz .wglyph")) && (await page.$("#wz .mbar")));
