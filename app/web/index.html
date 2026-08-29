@@ -38,8 +38,11 @@
   <p class="login-forget">Впервые здесь? <a href="#" id="l-reg">Создать аккаунт</a></p>
 </div>
 
-<!-- ── онбординг (7 шагов) ── -->
-<div id="scr-wizard" class="hidden"><div class="mcard" id="wz"></div></div>
+<!-- ── онбординг (7 шагов): слева живое ядро (6-O3), справа карточка шага ── -->
+<div id="scr-wizard" class="hidden"><div class="wgrid">
+  <aside id="wcore" class="off" aria-hidden="true"></aside>
+  <div class="mcard" id="wz"></div>
+</div></div>
 
 <!-- ── приложение: каркас chat.html ── -->
 <div id="scr-app" class="cs-page hidden">

@@ -119,6 +119,8 @@ function modelName(id) {
 
 function renderWizard() {
   show("scr-wizard");
+  coreReset(); /* 6-O3: чистое ядро при (пере)входе в визард */
+  coreInit();
   /* 8.4: черновик онбординга — вернулся и продолжил с того же шага */
   try {
     const d = JSON.parse(localStorage.getItem("monica_wizard_draft") || "null");
@@ -134,25 +136,13 @@ function wDraftClear() {
   try { localStorage.removeItem("monica_wizard_draft"); } catch (e) {}
 }
 
-/* Фаза 5-C: SVG-глиф у заголовка каждого шага (stroke-стиль chat.html) */
-const WGLYPH = {
-  2: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3c-1.4 0-2.7-.3-3.9-.9L3 20l1.2-4.3a8.1 8.1 0 0 1-1.2-4.2A8.4 8.4 0 0 1 11.5 3.2a8.4 8.4 0 0 1 9.5 8.3z"/><path d="M9.5 9.5a2.5 2.5 0 0 1 4.9.8c0 1.6-2.4 2-2.4 3.2"/><circle cx="12" cy="16.6" r=".4"/></svg>',
-  3: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.4-3.4 4.4-5 8-5s6.6 1.6 8 5"/></svg>',
-  4: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg>',
-  5: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg>',
-  6: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4.5"/><path d="M11.2 11.8 20 3M15.5 7.5l3 3M18 5l2.5 2.5"/></svg>',
-  7: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.5"/></svg>'
-};
-
 function wHead(title) {
-  /* Фаза 5-C: глиф-бейдж над заголовком шага (стиль .wglyph из monica.css) */
-  const g = WGLYPH[W.step] ? '<div class="wglyph">' + WGLYPH[W.step] + "</div>" : "";
-  /* 6-O2: вспышка прогресс-бара после ачивки */
+  /* 6-O3: глиф заменён живым ядром-сценой (#wcore); вспышка бара после ачивки */
   const flash = W.barFlash ? ' class="flash"' : "";
   W.barFlash = false;
   return '<div class="mstep">Шаг ' + W.step + " из 7</div>" +
     '<div class="mbar"><i' + flash + ' style="width:' + (W.step / 7 * 100) + '%"></i></div>' +
-    g + '<div class="mtitle">' + title + "</div>";
+    '<div class="mtitle">' + title + "</div>";
 }
 function wNav() {
   return '<div class="err" id="w-err"></div><div class="row">' +
@@ -325,43 +315,135 @@ function achvToast(text) {
     achvT = setTimeout(() => d.remove(), 340);
   }, 2000);
 }
-/* ритуал «поле → ядро»: точка летит от заполненного поля к глифу шага (FLIP) */
-function coreFly(fromEl) {
-  if (!fromEl || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  const g = document.querySelector("#wz .wglyph");
-  if (!g) return;
-  const a = fromEl.getBoundingClientRect(), b = g.getBoundingClientRect();
+/* ── 6-O3: «Живое ядро» — сквозная сцена визарда (plans/6-O3-living-core-concept.md) ── */
+const WCORE_PAL = ["#8fb4ff", "#b9a3ff", "#d0a04a", "#6be08a", "#e06c75", "#8b96a3"];
+const MOD_NAMES = {wikipedia: "Википедия", telegram: "Telegram-бот", analytics: "Аналитика"};
+const CORE_CAP = {2: "ядро запоминает источник", 3: "ядро узнаёт тебя",
+  4: "настройка мощности", 5: "стыковка модулей", 6: "каналы связи", 7: "защита ядра"};
+const CORE = {sats: {}};
+function coreInit() {
+  const c = $("wcore");
+  if (!c || c.dataset.ready) return;
+  c.dataset.ready = "1";
+  c.innerHTML = '<div class="wcore-scene"><div class="wcore-orb" id="wcore-orb">' +
+    '<i class="ho o1"></i><i class="ho o2"></i><span class="wcore-glow"></span>' +
+    '<span class="wcore-globe">' + heroGlobeSvg("") + "</span>" +
+    '<img class="wcore-ava" id="wcore-ava" alt="" hidden>' +
+    '<span class="wcore-ring" id="wcore-ring"></span>' +
+    '<span class="wcore-shield" id="wcore-shield"></span>' +
+    '<span class="wsat" data-slot="0"></span><span class="wsat" data-slot="1"></span>' +
+    '<span class="wsat" data-slot="2"></span></div>' +
+    '<div class="wcore-cap" id="wcore-cap"></div></div>';
+}
+function coreReset() {
+  CORE.sats = {};
+  document.querySelectorAll("#wcore .wsat").forEach(s => { s.className = "wsat"; s.textContent = ""; });
+  setRing(null); setShield(false); setCoreGlow(0); coreListen(false);
+  const a = $("wcore-ava");
+  if (a) { a.hidden = true; a.removeAttribute("src"); }
+}
+function coreShowStep() {
+  const c = $("wcore");
+  if (!c) return;
+  c.classList.toggle("off", W.step <= 1);
+  if (W.step <= 1) return;
+  coreCaption(CORE_CAP[W.step] || "");
+  /* восстановление состояния ядра из черновика (мгновенно, без полётов) */
+  if (W.step === 4 && W.model) {
+    const i = ((CFGM && CFGM.models) || []).findIndex(m => m.id === W.model);
+    setRing(WCORE_PAL[(i < 0 ? 0 : i) % WCORE_PAL.length]);
+    setCoreGlow((W.daily_load - 1) / 9);
+  }
+  if (W.step === 5) {
+    Object.keys(MOD_NAMES).forEach(k => {
+      if (W.modules[k]) addSatellite(MOD_NAMES[k], true); else removeSatellite(MOD_NAMES[k]);
+    });
+  }
+}
+function coreCaption(t) { const el = $("wcore-cap"); if (el) el.textContent = t || ""; }
+function coreFlash() {
+  const o = $("wcore-orb");
+  if (!o || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  o.classList.remove("core-flash"); void o.offsetWidth; o.classList.add("core-flash");
+  setTimeout(() => o.classList.remove("core-flash"), 520);
+}
+function setCoreGlow(v) {
+  const o = $("wcore-orb");
+  if (o) o.style.setProperty("--core-glow", String(Math.max(0, Math.min(1, v))));
+}
+function coreListen(on) { const o = $("wcore-orb"); if (o) o.classList.toggle("listen", !!on); }
+function setRing(color) {
+  const r = $("wcore-ring");
+  if (!r) return;
+  if (color) { r.style.borderColor = color; r.classList.add("on"); }
+  else { r.classList.remove("on"); r.style.borderColor = ""; }
+}
+function setShield(on) { const s = $("wcore-shield"); if (s) s.classList.toggle("on", !!on); }
+function coreAvatar(dataUrl) {
+  const a = $("wcore-ava"), o = $("wcore-orb");
+  if (!a || !o || !dataUrl) return;
+  a.src = dataUrl; a.hidden = false; o.classList.add("show-ava");
+  setTimeout(() => { a.hidden = true; o.classList.remove("show-ava"); }, 1500);
+}
+/* полёт точки «действие → ядро» (шаги 2/3/4/6) */
+function coreFly(fromEl, cls) {
+  const o = $("wcore-orb");
+  if (!fromEl || !o || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const a = fromEl.getBoundingClientRect(), b = o.getBoundingClientRect();
   const dot = document.createElement("i");
-  dot.className = "core-fly";
+  dot.className = "core-fly " + (cls || "");
   dot.style.left = (a.left + a.width / 2) + "px";
   dot.style.top = (a.top + a.height / 2) + "px";
   document.body.appendChild(dot);
   requestAnimationFrame(() => requestAnimationFrame(() => {
     dot.style.transform = "translate(" + (b.left + b.width / 2 - a.left - a.width / 2) + "px," +
       (b.top + b.height / 2 - a.top - a.height / 2) + "px) scale(.25)";
-    dot.style.opacity = ".15";
+    dot.style.opacity = ".1";
   }));
-  setTimeout(() => {
-    dot.remove();
-    g.classList.add("pulse");
-    setTimeout(() => g.classList.remove("pulse"), 600);
-  }, 620);
+  setTimeout(() => { dot.remove(); coreFlash(); }, 640);
 }
-/* финальный запуск: глобус наполняется светом, орбиты ускоряются → переход в чат */
+/* спутники-модули на орбите ядра (шаг 5) */
+function addSatellite(name, instant, fromEl) {
+  if (CORE.sats[name] !== undefined) return;
+  const used = Object.values(CORE.sats);
+  const slot = [0, 1, 2].find(i => !used.includes(i));
+  if (slot === undefined) return;
+  CORE.sats[name] = slot;
+  const s = document.querySelector('.wsat[data-slot="' + slot + '"]');
+  if (!s) return;
+  s.textContent = name;
+  if (!instant && fromEl) coreFly(fromEl);
+  s.classList.add("filled");
+}
+function removeSatellite(name) {
+  const slot = CORE.sats[name];
+  if (slot === undefined) return;
+  delete CORE.sats[name];
+  const s = document.querySelector('.wsat[data-slot="' + slot + '"]');
+  if (!s) return;
+  s.classList.add("bye");
+  setTimeout(() => { s.classList.remove("filled", "bye"); s.textContent = ""; }, 380);
+}
+/* финальный запуск: спутники слетаются в ядро → глобус светом → чат */
 function launchFinale() {
-  const f = document.createElement("div");
-  f.id = "finale";
-  f.innerHTML = '<div class="fin-orbs" aria-hidden="true"><i class="ho o1"></i>' +
-    '<i class="ho o2"></i><i class="ho o3"></i></div>' +
-    '<div class="fin-core">' + heroGlobeSvg("fin") + "</div>" +
-    '<div class="fin-t">Мозг запущен</div>';
-  document.body.appendChild(f);
-  setTimeout(() => f.classList.add("out"), 1900);
-  setTimeout(() => { f.remove(); boot(); }, 2400);
+  const orb = $("wcore-orb");
+  if (orb) orb.classList.add("gather");
+  setTimeout(() => {
+    const f = document.createElement("div");
+    f.id = "finale";
+    f.innerHTML = '<div class="fin-orbs" aria-hidden="true"><i class="ho o1"></i>' +
+      '<i class="ho o2"></i><i class="ho o3"></i></div>' +
+      '<div class="fin-core">' + heroGlobeSvg("fin") + "</div>" +
+      '<div class="fin-t">Мозг запущен</div>';
+    document.body.appendChild(f);
+    setTimeout(() => f.classList.add("out"), 1900);
+    setTimeout(() => { f.remove(); boot(); }, 2400);
+  }, orb ? 420 : 0);
 }
 
 function renderW() {
   const wz = $("wz");
+  coreShowStep(); /* 6-O3: ядро живёт на шагах 2–7 */
   if (W.step === 1) {
     /* 6-O: онбординг 2.0 — слайдер-презентация продукта */
     renderHeroSlider(wz);
@@ -373,7 +455,7 @@ function renderW() {
       $(box).innerHTML = arr.filter(Boolean).map(x =>
         '<span class="chip' + (cur === x ? " sel" : "") + '" data-x="' + x + '">' + x + "</span>").join("");
       $(box).querySelectorAll(".chip").forEach(c => c.onclick = () => {
-        if (set === "src") W.source = c.dataset.x;
+        if (set === "src") { W.source = c.dataset.x; coreFly(c); } /* 6-O3: нейрон в ядро */
         else W.purpose = (W.purpose === c.dataset.x) ? "" : c.dataset.x;
         renderW();
       });
@@ -392,11 +474,13 @@ function renderW() {
       if (!f) return;
       if (f.size > 300 * 1024) { $("w-err").textContent = "файл больше 300 КБ"; return; }
       const rd = new FileReader();
-      rd.onload = () => { W.avatar = rd.result; $("w-err").textContent = ""; };
+      rd.onload = () => { W.avatar = rd.result; $("w-err").textContent = ""; coreAvatar(W.avatar); };
       rd.readAsDataURL(f);
     };
-    /* 6-O2: ритуал «поле → ядро» — точка летит к глифу при blur заполненного юзернейма */
+    /* 6-O3: ядро «прислушивается» в фокусе; blur заполненного — нейрон в ядро */
+    $("w-user").addEventListener("focus", () => coreListen(true));
     $("w-user").addEventListener("blur", () => {
+      coreListen(false);
       if ($("w-user").value.trim()) coreFly($("w-user"));
     });
     wBind(async () => {
@@ -413,8 +497,17 @@ function renderW() {
       '<label>Сколько информации планируешь заносить в день</label>' +
       '<input type="range" id="w-load" min="1" max="10" value="' + W.daily_load + '">' +
       '<div class="sub">нагрузка: <b id="w-lv">' + W.daily_load + "</b>/10</div>" + wNav();
-    wz.querySelectorAll(".chip").forEach(c => c.onclick = () => { W.model = c.dataset.id; renderW(); });
-    $("w-load").oninput = () => { W.daily_load = +$("w-load").value; $("w-lv").textContent = W.daily_load; };
+    wz.querySelectorAll(".chip").forEach(c => c.onclick = () => {
+      W.model = c.dataset.id;
+      const i = CFGM.models.findIndex(m => m.id === W.model);
+      setRing(WCORE_PAL[(i < 0 ? 0 : i) % WCORE_PAL.length]); /* 6-O3: кольцо модели */
+      coreFly(c);
+      renderW();
+    });
+    $("w-load").oninput = () => {
+      W.daily_load = +$("w-load").value; $("w-lv").textContent = W.daily_load;
+      setCoreGlow((W.daily_load - 1) / 9); /* 6-O3: свечение = нагрузка */
+    };
     wBind(async () => W.model ? null : "выбери модель");
   } else if (W.step === 5) {
     const names = {wikipedia: ["Википедия", "поиск по твоим заметкам, сводки, выжимки"],
@@ -437,6 +530,9 @@ function renderW() {
       }
       W.modules[m] = !W.modules[m];
       t.className = "cs-sw" + (W.modules[m] ? " on" : "");
+      /* 6-O3: модуль пристыковывается/отстыковывается на орбите ядра */
+      if (W.modules[m]) addSatellite(MOD_NAMES[m], false, t);
+      else removeSatellite(MOD_NAMES[m]);
     });
     wBind(async () => null);
   } else if (W.step === 6) {
@@ -449,7 +545,16 @@ function renderW() {
       '<p class="sub">Ключи шифруются, каждый сервис изолирован. В закрытой бете обязательны.</p>' +
       Object.keys(ks).map(k => '<label>' + ks[k][0] + ' — ' + ks[k][1] + '</label>' +
         '<input class="minput" type="password" id="k-' + k + '">').join("") + wNav();
-    for (const k of Object.keys(ks)) $("k-" + k).value = W.keys[k];
+    for (const k of Object.keys(ks)) {
+      const inp = $("k-" + k);
+      inp.value = W.keys[k];
+      /* 6-O3: канал связи — ключ ≥8 символов испускает золотой нейрон */
+      inp.addEventListener("input", () => {
+        const full = inp.value.trim().length >= 8;
+        if (full && !inp.dataset.chan) { inp.dataset.chan = "1"; coreFly(inp, "chan"); }
+        if (!full && inp.dataset.chan) inp.dataset.chan = "";
+      });
+    }
     wBind(async () => {
       for (const k of Object.keys(ks)) W.keys[k] = $("k-" + k).value.trim();
       const miss = Object.keys(W.keys).filter(k => W.keys[k].length < 8);
@@ -464,6 +569,9 @@ function renderW() {
       Object.keys(W.modules).filter(k => W.modules[k]).join(", ") + '</b><br>Ключи: <b>' +
       Object.keys(W.keys).filter(k => W.keys[k]).join(", ") + "</b></div>" + wNav();
     $("w-hint").oninput = () => W.hint = $("w-hint").value;
+    /* 6-O3: щит ядра при работе с паролем */
+    $("w-pass").addEventListener("focus", () => setShield(true));
+    $("w-pass").addEventListener("blur", () => setShield(false));
     wBind(async () => {
       W.password = $("w-pass").value;
       if (W.password.length < 6) return "пароль: минимум 6 символов";

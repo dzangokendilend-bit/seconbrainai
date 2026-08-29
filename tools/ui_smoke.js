@@ -75,8 +75,10 @@ const consoleErrors = [], badResponses = [];
     (await page.$(".beta-tag")) && (await page.$("#w-next")));
   await page.click("#w-next");
   await new Promise(r => setTimeout(r, 400));
-  ok("онбординг: шаг 2 — глиф и прогресс-бар",
-    (await page.$("#wz .wglyph")) && (await page.$("#wz .mbar")));
+  ok("онбординг: шаг 2 — ядро-сцена и прогресс-бар",
+    (await page.$("#wcore .wcore-globe")) && (await page.$("#wz .mbar")));
+  ok("6-O3: подпись ядра («ядро запоминает источник»)",
+    await page.$eval("#wcore-cap", el => el.textContent.length > 3).catch(() => false));
   /* 6-O2 часть 2: ачивка-тост после шага 2 + вспышка прогресс-бара */
   await page.click("#w-src .chip");
   await page.click("#w-next");
@@ -84,26 +86,52 @@ const consoleErrors = [], badResponses = [];
   ok("6-O2: ачивка-тост после шага 2", await page.$(".achv"));
   ok("6-O2: вспышка прогресс-бара (.mbar i.flash)",
     await page.$eval("#wz .mbar i", el => el.classList.contains("flash")).catch(() => false));
-  /* 6-O2: ритуал «поле → ядро» на шаге 3 */
+  /* 6-O3: живое ядро на шаге 3 */
   await page.click("#w-user");
-  await page.type("#w-user", "ritualtest");
+  await page.type("#w-user", "ritual" + (Date.now() % 100000));
+  ok("6-O3: ядро «прислушивается» в фокусе поля",
+    await page.$eval("#wcore-orb", el => el.classList.contains("listen")).catch(() => false));
   await page.click("#wz .mtitle"); /* blur поля */
   await new Promise(r => setTimeout(r, 150));
-  ok("6-O2: точка «поле → ядро» летит к глифу", await page.$(".core-fly"));
-  await new Promise(r => setTimeout(r, 700));
-  ok("6-O2: глиф вспыхнул после прилёта (.wglyph.pulse)",
-    await page.$eval("#wz .wglyph", el => el.classList.contains("pulse")).catch(() => false));
+  ok("6-O3: нейрон летит из поля в ядро", await page.$(".core-fly"));
+  await new Promise(r => setTimeout(r, 550)); /* вспышка: 640–1160ms после blur */
+  ok("6-O3: ядро вспыхнуло после прилёта (.core-flash)",
+    await page.$eval("#wcore-orb", el => el.classList.contains("core-flash")).catch(() => false));
+  await new Promise(r => setTimeout(r, 600));
+  /* 6-O3: шаг 4 — кольцо модели + свечение от ползунка */
+  await page.click("#w-next");
+  await new Promise(r => setTimeout(r, 400));
+  await page.click("#wz .mod .chip");
+  await new Promise(r => setTimeout(r, 350));
+  ok("6-O3: кольцо модели на орбите ядра",
+    await page.$eval("#wcore-ring", el => el.classList.contains("on")).catch(() => false));
+  await page.evaluate(() => {
+    const r = document.getElementById("w-load");
+    r.value = "10";
+    r.dispatchEvent(new Event("input"));
+  });
+  ok("6-O3: свечение ядра от ползунка нагрузки",
+    await page.$eval("#wcore-orb", el => el.style.getPropertyValue("--core-glow") === "1").catch(() => false));
+  /* 6-O3: шаг 5 — спутники-модули на орбите */
+  await page.click("#w-next");
+  await new Promise(r => setTimeout(r, 450));
+  ok("6-O3: спутник «Википедия» восстановлен на орбите",
+    await page.$(".wsat.filled"));
+  await page.click('#wz .cs-sw[data-m="telegram"]');
+  await new Promise(r => setTimeout(r, 350));
+  ok("6-O3: второй спутник пристыкован при включении модуля",
+    (await page.$$(".wsat.filled")).length === 2);
   /* 6-O2: финальная сцена запуска (boot-заглушка, чтобы не входить в приложение) */
   await page.evaluate(() => {
     window.__bootCalled = false;
     window.boot = () => { window.__bootCalled = true; };
     launchFinale();
   });
-  await new Promise(r => setTimeout(r, 400));
+  await new Promise(r => setTimeout(r, 700)); /* 6-O3: сбор спутников 420ms + появление финала */
   ok("6-O2: финальная сцена — глобус и ускоренные орбиты",
     (await page.$("#finale .fin-core .globe")) && (await page.$("#finale .fin-orbs .ho")));
   ok("6-O2: финальная сцена — «Мозг запущен»", await page.$("#finale .fin-t"));
-  await new Promise(r => setTimeout(r, 2300));
+  await new Promise(r => setTimeout(r, 2400));
   ok("6-O2: финал закрылся и передал управление (boot-заглушка вызвана)",
     await page.evaluate(() => window.__bootCalled === true).catch(() => false));
   await page.goto(BASE, {waitUntil: "networkidle0", timeout: 15000});
