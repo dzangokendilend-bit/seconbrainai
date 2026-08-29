@@ -895,12 +895,12 @@ function sessTrack(role, content) {
   drawSess();
   drawRepCount();
 }
-/* счётчик реплик: скрыт без выбранной сессии, показывает только текущую */
+/* счётчик реплик: скрыт без выбранной сессии и при 0, показывает только текущую */
 function drawRepCount() {
   const row = $("pf-cnt");
   if (!row) return;
   const wrap = row.parentElement;
-  if (!SESS.cur) { wrap.style.display = "none"; return; }
+  if (!SESS.cur || !SESS.cur.msgs.length) { wrap.style.display = "none"; return; }
   wrap.style.display = "";
   row.textContent = SESS.cur.msgs.length;
 }
@@ -971,12 +971,13 @@ function openSess(id) {
   drawRepCount();
 }
 function newSess() {
-  /* баг-16/17/18: новая сессия сразу видима в списке и привязана к проекту */
+  /* новая сессия создаётся сразу: видна в списке, заголовок в шапке */
   SESS.cur = null;
   CHAT_HIST = [];
   openTab("chat");
-  drawSess();
+  const s = sessEnsure();
   drawRepCount();
+  sessTitleType(s.title || "Новая сессия");
 }
 /* баг-12: заголовок сессии печатается и остаётся (вместо цикла «С чего начнём») */
 let SESS_TW = null;
@@ -1005,6 +1006,8 @@ function renderShell() {
   $("cs-nav").querySelectorAll(".cs-navitem").forEach(b => b.onclick = () => {
     document.querySelectorAll(".cs-navitem").forEach(x => x.classList.remove("on"));
     b.classList.add("on");
+    /* фича: повторный клик по «Чат» — новая сессия */
+    if (b.dataset.tab === "chat" && TAB === "chat") { newSess(); return; }
     openTab(b.dataset.tab);
   });
   const p = ME;
@@ -1164,12 +1167,12 @@ function tabChat(p) {
       if (b) b.classList.remove("open");
     });
   }
-  /* 8.8: баннер сворачивается в бейдж (замок — только иконка в кнопке) */
+  /* 8.8: одна кнопка в углу скрывает/раскрывает баннер */
   const bb = $("beta-box"), bmin = $("beta-min");
   const setMin = v => {
     bb.classList.toggle("min", v);
-    bmin.textContent = v ? "🔒" : "–";
-    bmin.title = v ? "развернуть" : "свернуть";
+    bmin.textContent = v ? "+" : "–";
+    bmin.title = v ? "показать" : "скрыть";
   };
   try { setMin(localStorage.getItem("monica_beta_min") === "1"); } catch (e) {}
   bmin.onclick = () => {

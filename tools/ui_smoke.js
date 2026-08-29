@@ -94,10 +94,14 @@ const consoleErrors = [], badResponses = [];
   await page.click("#wz .mtitle"); /* blur поля */
   await new Promise(r => setTimeout(r, 150));
   ok("6-O3: нейрон летит из поля в ядро", await page.$(".core-fly"));
-  await new Promise(r => setTimeout(r, 550)); /* вспышка: 640–1160ms после blur */
-  ok("6-O3: ядро вспыхнуло после прилёта (.core-flash)",
-    await page.$eval("#wcore-orb", el => el.classList.contains("core-flash")).catch(() => false));
-  await new Promise(r => setTimeout(r, 600));
+  /* вспышка: 640–1160ms после blur — поллинг, чтобы не ловить тайминг-флейк */
+  let flashed = false;
+  for (let i = 0; i < 12 && !flashed; i++) {
+    flashed = await page.$eval("#wcore-orb", el => el.classList.contains("core-flash")).catch(() => false);
+    if (!flashed) await new Promise(r => setTimeout(r, 100));
+  }
+  ok("6-O3: ядро вспыхнуло после прилёта (.core-flash)", flashed);
+  await new Promise(r => setTimeout(r, 700));
   /* 6-O4: шаг 4 — пара моделей (провайдер + api_model) */
   await page.click("#w-next");
   await new Promise(r => setTimeout(r, 400));
