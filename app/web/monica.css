@@ -597,10 +597,20 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 .ava-pick img{width:100%;height:100%;object-fit:cover;display:block}
 .ava-pick .ava-letter{position:absolute;inset:0;display:flex;align-items:center;
   justify-content:center;font-family:var(--serif);font-size:34px;color:var(--muted)}
-.ava-pick .ava-ov{position:absolute;inset:auto 0 0;height:26px;display:flex;align-items:center;
-  justify-content:center;font-size:12px;color:#fff;background:rgba(0,0,0,.55);
+.ava-pick .ava-ov{position:absolute;inset:auto 0 0;height:28px;display:flex;align-items:center;
+  justify-content:center;font-size:13px;color:#fff;background:rgba(0,0,0,.6);
   opacity:0;transition:.2s}
 .ava-pick:hover .ava-ov{opacity:1}
+/* вкладки настроек: непрозрачный фон, прилипают при скролле (не просвечивают) */
+.set-tabs{position:sticky;top:0;z-index:5;background:#0b0b0e;
+  padding:10px 0;margin-bottom:12px}
+/* редактор терминала: на всю высоту панели + ресайз вниз за хендл */
+#teditor,#tchat{display:flex;flex-direction:column;flex:1;min-height:0}
+.te-resize{flex:none;height:7px;cursor:ns-resize;display:flex;align-items:center;
+  justify-content:center;margin:2px 0}
+.te-resize::before{content:"";width:46px;height:4px;border-radius:2px;
+  background:rgba(255,255,255,.14);transition:.15s}
+.te-resize:hover::before{background:rgba(143,180,255,.5)}
 .ava-meta{display:flex;flex-direction:column;gap:6px;align-items:flex-start;min-width:0}
 .ava-meta .un-big{font-family:var(--serif);font-size:19px;color:var(--text);
   word-break:break-all}

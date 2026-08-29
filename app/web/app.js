@@ -1985,7 +1985,7 @@ function setTabProfile(p) {
     '<div class="ava-pick" id="ava-pick" title="сменить аватар">' +
     (p.avatar ? '<img src="' + p.avatar + '?t=' + Date.now() + '">' :
       '<span class="ava-letter">' + esc((p.username || "?")[0].toUpperCase()) + "</span>") +
-    '<span class="ava-ov">📷 сменить</span></div>' +
+    '<span class="ava-ov">📷</span></div>' +
     '<input type="file" id="p-ava" accept="image/png,image/jpeg" hidden>' +
     '<div class="ava-meta"><div class="un-big">' + esc(p.username) + "</div>" +
     '<span class="sub" style="padding:0">создан: ' + esc(p.created || "—") + "</span>" +
@@ -2017,7 +2017,7 @@ function setTabProfile(p) {
     const rd = new FileReader();
     rd.onload = () => {
       dirtyAva = rd.result;
-      $("ava-pick").innerHTML = '<img src="' + dirtyAva + '"><span class="ava-ov">📷 сменить</span>';
+      $("ava-pick").innerHTML = '<img src="' + dirtyAva + '"><span class="ava-ov">📷</span>';
       markDirty();
     };
     rd.readAsDataURL(f);
