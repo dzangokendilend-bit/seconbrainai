@@ -893,11 +893,20 @@ function sessTrack(role, content) {
   s.ts = new Date().toLocaleString("ru-RU", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"});
   sessSave();
   drawSess();
-  const cnt = $("pf-cnt");
-  if (cnt) cnt.textContent = s.msgs.length;
+  drawRepCount();
+}
+/* счётчик реплик: скрыт без выбранной сессии, показывает только текущую */
+function drawRepCount() {
+  const row = $("pf-cnt");
+  if (!row) return;
+  const wrap = row.parentElement;
+  if (!SESS.cur) { wrap.style.display = "none"; return; }
+  wrap.style.display = "";
+  row.textContent = SESS.cur.msgs.length;
 }
 function drawSess() {
   const box = $("cs-sess");
+  if (!box) return;
   if (!box) return;
   /* 8.9: поиск; 6.11: закреплённые сверху; 6-S: фильтр по проекту */
   const q = (($("sess-q") && $("sess-q").value) || "").toLowerCase();
@@ -959,8 +968,7 @@ function openSess(id) {
   }
   hideEmpty();
   drawSess();
-  const cnt = $("pf-cnt");
-  if (cnt) cnt.textContent = s.msgs.length;
+  drawRepCount();
 }
 function newSess() {
   /* баг-16/17/18: новая сессия сразу видима в списке и привязана к проекту */
@@ -968,6 +976,7 @@ function newSess() {
   CHAT_HIST = [];
   openTab("chat");
   drawSess();
+  drawRepCount();
 }
 /* баг-12: заголовок сессии печатается и остаётся (вместо цикла «С чего начнём») */
 let SESS_TW = null;
@@ -1005,7 +1014,7 @@ function renderShell() {
     '<div class="un">' + esc(p.username) + "</div>" +
     '<div class="mdl">' + esc((p.onboarding.prefs || {}).model || "") + "</div>" +
     '<div class="st"><i></i>онлайн</div>' +
-    '<div class="cnt">реплик в сессии: <b id="pf-cnt">0</b></div>' +
+    '<div class="cnt" id="pf-cnt-row" style="display:none">реплик в сессии: <b id="pf-cnt">0</b></div>' +
     "</div>" +
     /* 5-H.7 + 6-S: сессии и проекты под профильной карточкой */
     '<div class="cs-sess-h">сессии</div>' +
@@ -1155,11 +1164,12 @@ function tabChat(p) {
       if (b) b.classList.remove("open");
     });
   }
-  /* 8.8: баннер сворачивается в маленький бейдж */
+  /* 8.8: баннер сворачивается в бейдж (замок — только иконка в кнопке) */
   const bb = $("beta-box"), bmin = $("beta-min");
   const setMin = v => {
     bb.classList.toggle("min", v);
-    bmin.textContent = v ? "🔒 бета" : "–";
+    bmin.textContent = v ? "🔒" : "–";
+    bmin.title = v ? "развернуть" : "свернуть";
   };
   try { setMin(localStorage.getItem("monica_beta_min") === "1"); } catch (e) {}
   bmin.onclick = () => {
@@ -1237,7 +1247,8 @@ async function chatTurn(text) {
       if (chunk.done) break;
       acc += dec.decode(chunk.value, {stream: true});
       b.textContent = acc;
-      log && (log.scrollTop = log.scrollHeight);
+      const lg = $("chat-log");
+      if (lg) lg.scrollTop = lg.scrollHeight;
     }
     b.innerHTML = md(acc);
     CHAT_HIST.push({role: "assistant", content: acc});

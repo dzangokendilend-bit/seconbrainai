@@ -571,10 +571,12 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
   color:var(--muted);width:22px;height:22px;border-radius:50%;cursor:pointer;
   font-size:12px;line-height:1;transition:.15s;z-index:2}
 .beta-min:hover{background:rgba(255,255,255,.16);color:var(--text)}
-.beta.min{cursor:pointer;padding:8px 40px 8px 12px;font-size:12px;color:var(--muted)}
+/* свёрнутый бейдж: одна строка «🔒 бета · тестовый режим — подробнее», без наложений */
+.beta.min{cursor:pointer;padding:7px 12px;font-size:12px;color:var(--muted);
+  display:flex;align-items:center;gap:8px;white-space:nowrap}
 .beta.min h3,.beta.min p{display:none}
-.beta.min::after{content:'тестовый режим · подробнее →'}
-.beta.min .beta-min{position:static;margin-right:8px;vertical-align:middle}
+.beta.min::after{content:'тестовый режим · подробнее →';font-family:var(--ui)}
+.beta.min .beta-min{position:static;flex:none;margin:0}
 /* баг-11: «Думаю…» и системные заметки — приглушённый системный стиль */
 .chat-msg.sysnote{background:transparent;border:1px dashed rgba(255,255,255,.14);
   color:var(--muted);font-size:12px;font-style:italic;padding:7px 13px;
@@ -593,10 +595,14 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 /* баг-7: шаг 5 — карточка модуля: текст слева, переключатель справа, без наложений */
 #wz .mod{display:flex;align-items:center;justify-content:space-between;gap:14px;
   border:1px solid var(--border);border-radius:var(--r-sm);background:rgba(255,255,255,.03);
-  padding:12px 14px;margin:8px 0}
-#wz .mod .t{font-size:13.5px;font-weight:600}
-#wz .mod .d{font-size:12px;color:var(--muted);margin-top:2px}
-#wz .mod .cs-sw{flex:none}
+  padding:12px 14px;margin:8px 0;min-width:0}
+#wz .mod > div:first-child{flex:1;min-width:0}
+#wz .mod .t{font-size:13.5px;font-weight:600;word-break:break-word}
+#wz .mod .d{font-size:12px;color:var(--muted);margin-top:2px;word-break:break-word}
+#wz .mod .cs-sw{flex:none;width:34px;height:19px}
+/* баг-5 фикс: вики-сайдбар — длинный текст не вылезает за панель */
+.wk-side{min-width:0;overflow-wrap:break-word}
+.wk-side .sub{display:block;word-break:break-word;line-height:1.5}
 /* 6-O4: пара моделей шага 4 + выбор языка флагами */
 .mod2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:6px}
 .modcol{border:1px solid var(--border);border-radius:var(--r-sm);background:rgba(255,255,255,.03);
