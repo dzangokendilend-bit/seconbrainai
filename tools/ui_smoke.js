@@ -54,23 +54,58 @@ const consoleErrors = [], badResponses = [];
   /* renderW срабатывает после fetch /api/models — ждём именно герой */
   await page.waitForSelector("#scr-wizard .hero-slider", {timeout: 5000}).catch(() => {});
   ok("онбординг: слайдер-презентация показан", await page.$("#scr-wizard .hero-slider"));
-  ok("онбординг: глобус на слайде", await page.$(".hero-slider .globe"));
-  ok("онбординг: точки-пагинация (3)", (await page.$$(".hdot")).length === 3);
-  ok("онбординг: кнопка «Знакомство»", await page.$("#hz-next"));
+  ok("онбординг: глобус и орбиты «Пробуждения»",
+    (await page.$(".hero-slider .globe")) && (await page.$(".hero-orbs .ho")));
+  ok("онбординг: точки-пагинация (5)", (await page.$$(".hdot")).length === 5);
   ok("онбординг: анимация шага (.wz-in)",
     await page.$eval("#wz", el => el.classList.contains("wz-in")).catch(() => false));
   await page.click("#hz-next");
-  await new Promise(r => setTimeout(r, 700));
-  ok("онбординг: слайд возможностей с демо-чатом",
-    (await page.$(".hcards")) && (await page.$("#hdemo-log")));
+  await new Promise(r => setTimeout(r, 500));
+  ok("онбординг: сцена «Хаос → порядок»", await page.$(".ill.chaos .cc"));
+  await page.click("#hz-next1");
+  await new Promise(r => setTimeout(r, 400));
+  ok("онбординг: сцена «Модули станции»", await page.$(".ill.dock .dm"));
   await page.click("#hz-next2");
+  await new Promise(r => setTimeout(r, 700));
+  ok("онбординг: сцена «Ассистент» с демо-чатом",
+    (await page.$(".atasks i")) && (await page.$("#hdemo-log")));
+  await page.click("#hz-next3");
   await new Promise(r => setTimeout(r, 300));
-  ok("онбординг: слайд беты + «Начать регистрацию»",
+  ok("онбординг: сцена «Запуск» + «Начать регистрацию»",
     (await page.$(".beta-tag")) && (await page.$("#w-next")));
   await page.click("#w-next");
   await new Promise(r => setTimeout(r, 400));
   ok("онбординг: шаг 2 — глиф и прогресс-бар",
     (await page.$("#wz .wglyph")) && (await page.$("#wz .mbar")));
+  /* 6-O2 часть 2: ачивка-тост после шага 2 + вспышка прогресс-бара */
+  await page.click("#w-src .chip");
+  await page.click("#w-next");
+  await new Promise(r => setTimeout(r, 350));
+  ok("6-O2: ачивка-тост после шага 2", await page.$(".achv"));
+  ok("6-O2: вспышка прогресс-бара (.mbar i.flash)",
+    await page.$eval("#wz .mbar i", el => el.classList.contains("flash")).catch(() => false));
+  /* 6-O2: ритуал «поле → ядро» на шаге 3 */
+  await page.click("#w-user");
+  await page.type("#w-user", "ritualtest");
+  await page.click("#wz .mtitle"); /* blur поля */
+  await new Promise(r => setTimeout(r, 150));
+  ok("6-O2: точка «поле → ядро» летит к глифу", await page.$(".core-fly"));
+  await new Promise(r => setTimeout(r, 700));
+  ok("6-O2: глиф вспыхнул после прилёта (.wglyph.pulse)",
+    await page.$eval("#wz .wglyph", el => el.classList.contains("pulse")).catch(() => false));
+  /* 6-O2: финальная сцена запуска (boot-заглушка, чтобы не входить в приложение) */
+  await page.evaluate(() => {
+    window.__bootCalled = false;
+    window.boot = () => { window.__bootCalled = true; };
+    launchFinale();
+  });
+  await new Promise(r => setTimeout(r, 400));
+  ok("6-O2: финальная сцена — глобус и ускоренные орбиты",
+    (await page.$("#finale .fin-core .globe")) && (await page.$("#finale .fin-orbs .ho")));
+  ok("6-O2: финальная сцена — «Мозг запущен»", await page.$("#finale .fin-t"));
+  await new Promise(r => setTimeout(r, 2300));
+  ok("6-O2: финал закрылся и передал управление (boot-заглушка вызвана)",
+    await page.evaluate(() => window.__bootCalled === true).catch(() => false));
   await page.goto(BASE, {waitUntil: "networkidle0", timeout: 15000});
   await page.waitForSelector("#l-user", {visible: true, timeout: 5000}).catch(() => {});
 

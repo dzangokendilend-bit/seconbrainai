@@ -147,8 +147,11 @@ const WGLYPH = {
 function wHead(title) {
   /* Фаза 5-C: глиф-бейдж над заголовком шага (стиль .wglyph из monica.css) */
   const g = WGLYPH[W.step] ? '<div class="wglyph">' + WGLYPH[W.step] + "</div>" : "";
+  /* 6-O2: вспышка прогресс-бара после ачивки */
+  const flash = W.barFlash ? ' class="flash"' : "";
+  W.barFlash = false;
   return '<div class="mstep">Шаг ' + W.step + " из 7</div>" +
-    '<div class="mbar"><i style="width:' + (W.step / 7 * 100) + '%"></i></div>' +
+    '<div class="mbar"><i' + flash + ' style="width:' + (W.step / 7 * 100) + '%"></i></div>' +
     g + '<div class="mtitle">' + title + "</div>";
 }
 function wNav() {
@@ -162,16 +165,18 @@ function wBind(next) {
     const err = await next();
     $("w-next").disabled = false;
     if (err) { $("w-err").textContent = err; return; }
+    /* 6-O2: ачивка-тост после ключевых шагов (2/4/5/6) */
+    if (ACHV[W.step]) achvToast(ACHV[W.step]);
     W.step++; wDraftSave(); renderW();
   };
   if ($("w-back")) $("w-back").onclick = () => { W.step--; wDraftSave(); renderW(); };
 }
 
-/* ── 6-O: онбординг 2.0 — слайдер-презентация продукта ── */
+/* ── 6-O2: «Ритуал запуска» — сюжетный слайдер онбординга ── */
 const HZ = {slide: 0, timer: null, demoDone: false};
 
-function heroGlobeSvg() {
-  return '<svg class="globe" viewBox="0 0 64 64" aria-hidden="true">' +
+function heroGlobeSvg(cls) {
+  return '<svg class="globe ' + (cls || "") + '" viewBox="0 0 64 64" aria-hidden="true">' +
     '<defs><clipPath id="wch"><circle cx="32" cy="32" r="27"/></clipPath></defs>' +
     '<circle cx="32" cy="32" r="27" class="g-fill"/>' +
     '<g clip-path="url(#wch)" class="g-line"><circle cx="32" cy="32" r="27"/>' +
@@ -186,59 +191,92 @@ function hcard(icon, title, text) {
 }
 function renderHeroSlider(wz) {
   wz.innerHTML =
-    '<div class="hero-slider">' +
+    '<div class="hero-slider" id="hero-slider">' +
+    /* пробуждение: орбиты-«нейроны», parallax от мыши */
+    '<div class="hero-orbs" aria-hidden="true"><i class="ho o1"></i><i class="ho o2"></i>' +
+    '<i class="ho o3"></i><i class="ho o4"></i></div>' +
+    /* сцена 0 — пробуждение */
     '<div class="hslide' + (HZ.slide === 0 ? " on" : "") + '" data-s="0">' +
-    '<div class="login-brand">' + heroGlobeSvg() + "</div>" +
-    "<h2>Привет! Это Моника</h2>" +
-    '<p class="sub">Твоё личное ИИ-пространство: заметки, чат, модули и терминал — в одном спокойном месте.</p>' +
+    '<div class="login-brand hg-wake">' + heroGlobeSvg("hg") + "</div>" +
+    "<h2>Пробуждение</h2>" +
+    '<p class="sub">Твой цифровой мозг просыпается. Моника соберёт заметки, задачи и идеи в одно спокойное пространство.</p>' +
     '<div class="wz-back-row"><button class="mbtn" id="w-exit">← на главную</button>' +
-    '<button class="mbtn acc" id="hz-next">Знакомство →</button></div></div>' +
+    '<button class="mbtn acc" id="hz-next">Дальше →</button></div></div>' +
+    /* сцена 1 — хаос → порядок */
     '<div class="hslide' + (HZ.slide === 1 ? " on" : "") + '" data-s="1">' +
-    "<h2>Что она умеет</h2>" +
-    '<div class="hcards">' +
-    hcard("chat", "Чат", "отвечает, помнит контекст, ведёт сессии") +
-    hcard("term", "Терминал", "наводит порядок в твоих заметках") +
-    hcard("wiki", "Вики", "сама собирает энциклопедию из заметок") +
-    hcard("tg", "Модули", "Telegram-бот, аналитика, поиск") +
-    "</div>" +
-    '<div class="hdemo"><div class="hdemo-h">живой пример</div><div class="hdemo-log" id="hdemo-log"></div></div>' +
+    '<div class="ill chaos" aria-hidden="true"><i class="cc">заметки</i><i class="cc">задачи</i>' +
+    '<i class="cc">идеи</i><i class="cc">встречи</i><i class="cc">проекты</i><i class="cc">теги</i></div>' +
+    "<h2>Хаос → порядок</h2>" +
+    '<p class="sub">Я превращаю твой хаос из заметок, задач и идей в понятную карту.</p>' +
     '<div class="wz-back-row"><button class="mbtn" id="hz-prev">← Назад</button>' +
-    '<button class="mbtn acc" id="hz-next2">Далее →</button></div></div>' +
+    '<button class="mbtn acc" id="hz-next1">Дальше →</button></div></div>' +
+    /* сцена 2 — модули станции */
     '<div class="hslide' + (HZ.slide === 2 ? " on" : "") + '" data-s="2">' +
-    '<span class="beta-tag">🔒 закрытое тестирование · тестовый режим</span>' +
-    "<h2>Осталось пару шагов</h2>" +
-    '<p class="sub">Соберём аккаунт: расскажешь, откуда ты, выберешь модель и модули, подключишь ключи API.</p>' +
-    '<p class="sub">Нашёл баг или есть идея — пиши автору в Telegram: <a href="https://t.me/sozrelyy" target="_blank" rel="noopener">@sozrelyy</a>.</p>' +
+    '<div class="ill dock" aria-hidden="true"><span class="dglobe">' + heroGlobeSvg("hg sm") + "</span>" +
+    '<i class="dm d1">Чат</i><i class="dm d2">Вики</i><i class="dm d3">Терминал</i></div>' +
+    "<h2>Модули как блоки станции</h2>" +
+    '<p class="sub">Ты сам решаешь, из каких модулей собирать свой мозг: чат, вики, терминал, бот.</p>' +
     '<div class="wz-back-row"><button class="mbtn" id="hz-prev2">← Назад</button>' +
+    '<button class="mbtn acc" id="hz-next2">Дальше →</button></div></div>' +
+    /* сцена 3 — ассистент + живое демо чата */
+    '<div class="hslide' + (HZ.slide === 3 ? " on" : "") + '" data-s="3">' +
+    '<div class="ill assist" aria-hidden="true"><span class="dglobe nod">' + heroGlobeSvg("hg sm") + "</span>" +
+    '<div class="atasks"><i>сводка недели</i><i>напоминание: встреча</i><i>идея → заметка</i></div></div>' +
+    "<h2>Персональный ассистент</h2>" +
+    '<p class="sub">Я слежу за твоими проектами и напоминаю о важном — бережно и вовремя.</p>' +
+    '<div class="hdemo"><div class="hdemo-h">живой пример</div><div class="hdemo-log" id="hdemo-log"></div></div>' +
+    '<div class="wz-back-row"><button class="mbtn" id="hz-prev3">← Назад</button>' +
+    '<button class="mbtn acc" id="hz-next3">Дальше →</button></div></div>' +
+    /* сцена 4 — запуск */
+    '<div class="hslide' + (HZ.slide === 4 ? " on" : "") + '" data-s="4">' +
+    '<span class="beta-tag">🔒 закрытое тестирование · тестовый режим</span>' +
+    "<h2>Запуск</h2>" +
+    '<p class="sub">Чтобы всё это работало для тебя — нужно всего пара полей.</p>' +
+    '<p class="sub">Нашёл баг или есть идея — пиши автору в Telegram: <a href="https://t.me/sozrelyy" target="_blank" rel="noopener">@sozrelyy</a>.</p>' +
+    '<div class="wz-back-row"><button class="mbtn" id="hz-prev4">← Назад</button>' +
     '<button class="mbtn acc" id="w-next">Начать регистрацию →</button></div></div>' +
     "</div>" +
-    '<div class="hero-dots">' + [0, 1, 2].map(i =>
+    '<div class="hero-dots">' + [0, 1, 2, 3, 4].map(i =>
       '<span class="hdot' + (HZ.slide === i ? " on" : "") + '" data-d="' + i + '"></span>').join("") + "</div>";
   /* 6.4: возврат на главную (черновик сохраняется) */
   $("w-exit").onclick = () => { wDraftSave(); renderLogin(); };
   const go = n => {
-    HZ.slide = n;
-    wz.querySelectorAll(".hslide").forEach(s => s.classList.toggle("on", +s.dataset.s === n));
-    wz.querySelectorAll(".hdot").forEach(d => d.classList.toggle("on", +d.dataset.d === n));
-    if (n === 1) setTimeout(heroDemoRun, 350);
+    HZ.slide = Math.max(0, Math.min(4, n));
+    wz.querySelectorAll(".hslide").forEach(s => s.classList.toggle("on", +s.dataset.s === HZ.slide));
+    wz.querySelectorAll(".hdot").forEach(d => d.classList.toggle("on", +d.dataset.d === HZ.slide));
+    if (HZ.slide === 3) setTimeout(heroDemoRun, 350);
   };
-  $("hz-next").onclick = () => { go(1); };
-  $("hz-next2").onclick = () => { go(2); };
-  $("hz-prev").onclick = () => { go(0); };
-  $("hz-prev2").onclick = () => { go(1); };
-  /* слайд 3 → шаг 2 визарда */
-  $("w-next").onclick = () => { W.step = 2; wDraftSave(); renderW(); };
+  /* $() ждёт голый id — срезаем ведущий "#" (без этого кнопки слайдера мертвы) */
+  const bind = (id, fn) => { const el = $(id.replace(/^#/, "")); if (el) el.onclick = fn; };
+  bind("#hz-next", () => go(HZ.slide + 1));
+  bind("#hz-next1", () => go(HZ.slide + 1));
+  bind("#hz-next2", () => go(HZ.slide + 1));
+  bind("#hz-next3", () => go(HZ.slide + 1));
+  bind("#hz-prev", () => go(HZ.slide - 1));
+  bind("#hz-prev2", () => go(HZ.slide - 1));
+  bind("#hz-prev3", () => go(HZ.slide - 1));
+  /* слайд «Запуск» → шаг 2 визарда */
+  bind("#w-next", () => { W.step = 2; wDraftSave(); renderW(); });
   wz.querySelectorAll(".hdot").forEach(d =>
     d.onclick = () => go(+d.dataset.d));
-  /* автопрокрутка первого слайда, если пользователь не начал взаимодействие */
+  /* 6-O2: parallax орбит от мыши (off при reduced-motion) */
+  const sl = $("hero-slider");
+  if (sl && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    sl.addEventListener("mousemove", e => {
+      const r = sl.getBoundingClientRect();
+      sl.style.setProperty("--mx", ((e.clientX - r.left) / r.width - .5).toFixed(3));
+      sl.style.setProperty("--my", ((e.clientY - r.top) / r.height - .5).toFixed(3));
+    });
+  }
+  /* автопрокрутка со сцены пробуждения */
   if (HZ.timer) { clearTimeout(HZ.timer); HZ.timer = null; }
   if (HZ.slide === 0 &&
       !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
     HZ.timer = setTimeout(() => {
       if (W.step === 1 && HZ.slide === 0) go(1);
-    }, 4500);
+    }, 5000);
   }
-  if (HZ.slide === 1) setTimeout(heroDemoRun, 350);
+  if (HZ.slide === 3) setTimeout(heroDemoRun, 350);
 }
 function heroDemoRun() {
   const log = $("hdemo-log");
@@ -265,6 +303,61 @@ function heroDemoRun() {
     }, 22);
   };
   next();
+}
+
+/* ── 6-O2 часть 2: ачивки-тосты, «поле → ядро», финальный запуск ── */
+const ACHV = {2: "Мозг запомнил, откуда ты", 4: "Мозг выбрал основную модель",
+  5: "Модули пристыкованы к станции", 6: "Каналы связи активированы"};
+let achvT = null;
+function achvToast(text) {
+  const old = document.querySelector(".achv");
+  if (old) old.remove();
+  if (achvT) clearTimeout(achvT);
+  const d = document.createElement("div");
+  d.className = "achv";
+  d.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+    'stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/>' +
+    '<path d="M8 12.5l2.7 2.7L16 9.5"/></svg>' + esc(text);
+  document.body.appendChild(d);
+  W.barFlash = true; /* вспышка прогресс-бара на следующем шаге */
+  achvT = setTimeout(() => {
+    d.classList.add("hide");
+    achvT = setTimeout(() => d.remove(), 340);
+  }, 2000);
+}
+/* ритуал «поле → ядро»: точка летит от заполненного поля к глифу шага (FLIP) */
+function coreFly(fromEl) {
+  if (!fromEl || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const g = document.querySelector("#wz .wglyph");
+  if (!g) return;
+  const a = fromEl.getBoundingClientRect(), b = g.getBoundingClientRect();
+  const dot = document.createElement("i");
+  dot.className = "core-fly";
+  dot.style.left = (a.left + a.width / 2) + "px";
+  dot.style.top = (a.top + a.height / 2) + "px";
+  document.body.appendChild(dot);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    dot.style.transform = "translate(" + (b.left + b.width / 2 - a.left - a.width / 2) + "px," +
+      (b.top + b.height / 2 - a.top - a.height / 2) + "px) scale(.25)";
+    dot.style.opacity = ".15";
+  }));
+  setTimeout(() => {
+    dot.remove();
+    g.classList.add("pulse");
+    setTimeout(() => g.classList.remove("pulse"), 600);
+  }, 620);
+}
+/* финальный запуск: глобус наполняется светом, орбиты ускоряются → переход в чат */
+function launchFinale() {
+  const f = document.createElement("div");
+  f.id = "finale";
+  f.innerHTML = '<div class="fin-orbs" aria-hidden="true"><i class="ho o1"></i>' +
+    '<i class="ho o2"></i><i class="ho o3"></i></div>' +
+    '<div class="fin-core">' + heroGlobeSvg("fin") + "</div>" +
+    '<div class="fin-t">Мозг запущен</div>';
+  document.body.appendChild(f);
+  setTimeout(() => f.classList.add("out"), 1900);
+  setTimeout(() => { f.remove(); boot(); }, 2400);
 }
 
 function renderW() {
@@ -302,6 +395,10 @@ function renderW() {
       rd.onload = () => { W.avatar = rd.result; $("w-err").textContent = ""; };
       rd.readAsDataURL(f);
     };
+    /* 6-O2: ритуал «поле → ядро» — точка летит к глифу при blur заполненного юзернейма */
+    $("w-user").addEventListener("blur", () => {
+      if ($("w-user").value.trim()) coreFly($("w-user"));
+    });
     wBind(async () => {
       W.username = $("w-user").value.trim();
       W.language = $("w-lang").value;
@@ -375,7 +472,7 @@ function renderW() {
         survey: {source: W.source, purpose: W.purpose},
         prefs: {language: W.language, model: W.model, daily_load: W.daily_load},
         modules: W.modules, analytics_password: W.analytics_password, keys: W.keys});
-      if (r.data.ok) { wDraftClear(); boot(); return null; }
+      if (r.data.ok) { wDraftClear(); launchFinale(); return null; }
       return r.data.error || "ошибка сохранения";
     });
   }

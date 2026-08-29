@@ -162,8 +162,117 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 .wglyph svg{width:20px;height:20px;color:var(--link)}
 .mhint{font-size:11.5px;color:var(--muted);margin:-8px 0 10px}
 
-/* ── 6-O: онбординг 2.0 — слайдер-презентация ── */
-.hero-slider{display:flex;flex-direction:column;min-height:430px}
+/* ── 6-O + 6-O2: онбординг 2.0 — «Ритуал запуска», сюжетный слайдер ── */
+.hero-slider{display:flex;flex-direction:column;min-height:460px;position:relative;overflow:hidden}
+/* пробуждение: орбиты-«нейроны» с parallax от мыши (--mx/--my ставит JS) */
+.hero-orbs{position:absolute;inset:0;pointer-events:none}
+.ho{position:absolute;border:1px solid rgba(143,180,255,.14);border-radius:50%;
+  left:50%;top:42%;transform:translate(-50%,-50%) translate(calc(var(--mx,0)*14px),calc(var(--my,0)*10px));
+  transition:transform .3s ease-out}
+.ho i,.ho::after{content:'';position:absolute;width:6px;height:6px;border-radius:50%;
+  background:var(--acc);box-shadow:0 0 8px rgba(143,180,255,.7)}
+.ho.o1{width:190px;height:190px;animation:orb-spin 14s linear infinite}
+.ho.o2{width:280px;height:280px;border-color:rgba(185,163,255,.10);animation:orb-spin 22s linear infinite reverse}
+.ho.o3{width:370px;height:370px;border-color:rgba(255,255,255,.06);animation:orb-spin 34s linear infinite}
+.ho.o4{width:80px;height:80px;border-color:rgba(143,180,255,.25);animation:orb-spin 9s linear infinite reverse}
+.ho.o1::after{top:-3px;left:50%}
+.ho.o2::after{bottom:8px;left:20%}
+.ho.o3::after{top:40%;right:-3px;background:var(--acc2);box-shadow:0 0 8px rgba(185,163,255,.7)}
+.ho.o4::after{top:50%;left:-3px}
+@keyframes orb-spin{to{transform:translate(-50%,-50%) translate(calc(var(--mx,0)*14px),calc(var(--my,0)*10px)) rotate(360deg)}}
+/* глобус «просыпается» из темноты */
+.hg-wake{animation:hg-wake 1.4s ease-out}
+.hg-wake .globe{animation:hg-float 5s ease-in-out infinite}
+@keyframes hg-wake{from{opacity:0;filter:brightness(0)}to{opacity:1;filter:brightness(1)}}
+@keyframes hg-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+/* сцена «хаос → порядок»: карточки собираются в сетку (loop) */
+.ill{width:100%;max-width:440px;min-height:120px;margin:4px 0 10px;position:relative}
+.ill.chaos{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.ill.chaos .cc{font-style:normal;font-size:12px;padding:6px 13px;border-radius:var(--r-pill);
+  border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--muted);
+  animation:cc-collect 4.5s ease-in-out infinite}
+.ill.chaos .cc:nth-child(odd){animation-name:cc-collect2}
+@keyframes cc-collect{0%,100%{transform:translate(0,0) rotate(var(--r,0deg));color:var(--muted)}
+  50%{transform:translate(0,-4px) rotate(0deg);color:var(--acc);border-color:rgba(143,180,255,.4)}}
+@keyframes cc-collect2{0%,100%{transform:translate(0,0) rotate(var(--r,0deg));color:var(--muted)}
+  50%{transform:translate(0,4px) rotate(0deg);color:var(--acc);border-color:rgba(143,180,255,.4)}}
+.ill.chaos .cc:nth-child(1){--r:-6deg}.ill.chaos .cc:nth-child(2){--r:4deg}
+.ill.chaos .cc:nth-child(3){--r:-3deg}.ill.chaos .cc:nth-child(4){--r:5deg}
+.ill.chaos .cc:nth-child(5){--r:-4deg}.ill.chaos .cc:nth-child(6){--r:3deg}
+/* сцена «модули станции»: чипы стыкуются к глобусу (loop) */
+.ill.dock{display:flex;align-items:center;justify-content:center;gap:18px;min-height:110px}
+.dglobe{flex:none;animation:hg-float 5s ease-in-out infinite}
+.dglobe .globe{width:56px;height:56px}
+.ill.dock .dm{font-style:normal;font-size:12px;padding:7px 14px;border-radius:var(--r-pill);
+  border:1px solid rgba(143,180,255,.35);background:rgba(143,180,255,.08);color:var(--text)}
+.ill.dock .d1{animation:dock-x 3.2s ease-in-out infinite}
+.ill.dock .d2{animation:dock-y 3.2s ease-in-out infinite .4s}
+.ill.dock .d3{animation:dock-x 3.2s ease-in-out infinite .8s}
+@keyframes dock-x{0%,100%{transform:translateX(-10px);opacity:.5}50%{transform:translateX(0);opacity:1}}
+@keyframes dock-y{0%,100%{transform:translateY(8px);opacity:.5}50%{transform:translateY(0);opacity:1}}
+/* сцена «ассистент»: глобус кивает, задачи подсвечиваются по очереди */
+.ill.assist{display:flex;align-items:center;justify-content:center;gap:22px;min-height:110px}
+.dglobe.nod .globe{animation:hg-nod 3s ease-in-out infinite}
+@keyframes hg-nod{0%,100%{transform:rotate(0)}50%{transform:rotate(6deg) translateY(3px)}}
+.atasks{display:flex;flex-direction:column;gap:7px}
+.atasks i{font-style:normal;font-size:12.5px;padding:7px 14px;border-radius:var(--r-sm);
+  border:1px solid var(--border);background:rgba(255,255,255,.035);color:var(--muted);
+  animation:atask 3.6s ease-in-out infinite}
+.atasks i:nth-child(2){animation-delay:1.2s}
+.atasks i:nth-child(3){animation-delay:2.4s}
+@keyframes atask{0%,100%{border-color:var(--border);color:var(--muted)}
+  15%,40%{border-color:rgba(143,180,255,.5);color:var(--text);background:rgba(143,180,255,.06)}}
+@media (prefers-reduced-motion: reduce){
+  .ho,.ill.chaos .cc,.ill.dock .dm,.dglobe .globe,.atasks i{animation:none}
+  .hg-wake{animation:none}
+}
+
+/* ── 6-O2 часть 2: ачивки-тосты, «поле → ядро», финальный запуск ── */
+.achv{position:fixed;top:22px;left:50%;transform:translateX(-50%);z-index:210;
+  display:flex;align-items:center;gap:9px;padding:9px 18px;border-radius:var(--r-pill);
+  border:1px solid rgba(208,160,74,.45);background:rgba(22,19,12,.88);
+  backdrop-filter:blur(8px);color:var(--text);font-size:13px;
+  box-shadow:0 6px 24px rgba(0,0,0,.5);animation:achv-in .3s ease}
+.achv svg{width:15px;height:15px;color:#d0a04a;flex:none}
+.achv.hide{animation:achv-out .32s ease forwards}
+@keyframes achv-in{from{opacity:0;transform:translate(-50%,-12px)}to{opacity:1;transform:translate(-50%,0)}}
+@keyframes achv-out{to{opacity:0;transform:translate(-50%,-12px)}}
+.mbar i.flash{animation:barflash .7s ease}
+@keyframes barflash{0%{box-shadow:0 0 0 rgba(143,180,255,0)}
+  35%{box-shadow:0 0 12px rgba(143,180,255,.9);background:#a9c6ff}
+  100%{box-shadow:0 0 0 rgba(143,180,255,0)}}
+.core-fly{position:fixed;width:10px;height:10px;border-radius:50%;background:var(--acc);
+  box-shadow:0 0 10px rgba(143,180,255,.8);z-index:99;pointer-events:none;
+  transition:transform .6s cubic-bezier(.45,-.15,.55,1),opacity .6s ease}
+.wglyph{transition:box-shadow .3s ease}
+.wglyph.pulse{animation:wg-pulse .55s ease}
+@keyframes wg-pulse{0%{box-shadow:0 0 0 rgba(143,180,255,0)}
+  45%{box-shadow:0 0 16px rgba(143,180,255,.75);transform:scale(1.12)}
+  100%{box-shadow:0 0 0 rgba(143,180,255,0);transform:scale(1)}}
+#finale{position:fixed;inset:0;z-index:220;background:rgba(6,6,6,.93);
+  backdrop-filter:blur(6px);display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:20px;animation:fin-in .4s ease}
+#finale.out{animation:fin-out .5s ease forwards}
+@keyframes fin-in{from{opacity:0}to{opacity:1}}
+@keyframes fin-out{to{opacity:0;visibility:hidden}}
+.fin-core{position:relative;width:150px;height:150px}
+.fin-core .globe{width:100%;height:100%;animation:fin-fill 1.8s ease forwards}
+@keyframes fin-fill{from{filter:brightness(.35) saturate(.6)}
+  to{filter:brightness(1.55) drop-shadow(0 0 28px rgba(143,180,255,.85))}}
+.fin-orbs{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.fin-orbs .ho{opacity:.5}
+.fin-orbs .ho.o1{animation-duration:4s}
+.fin-orbs .ho.o2{animation-duration:6s}
+.fin-orbs .ho.o3{animation-duration:9s}
+.fin-t{font-family:var(--serif);font-size:22px;color:var(--text);
+  animation:fin-t .8s ease .5s both}
+@keyframes fin-t{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){
+  .achv,.achv.hide,.mbar i.flash,.wglyph.pulse{animation:none}
+  .core-fly{display:none}
+  #finale,#finale.out{animation:none}
+  .fin-core .globe,.fin-orbs .ho,.fin-t{animation:none}
+}
 .hslide{display:none;flex:1;flex-direction:column;align-items:center;
   text-align:center;gap:8px}
 .hslide.on{display:flex;animation:tabin .25s ease-out}

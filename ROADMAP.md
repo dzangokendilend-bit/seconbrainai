@@ -33,20 +33,20 @@
 ## 2. Где мы сейчас
 
 ```
-9534211 Phase 5-G: UI polish (term-wide, VS Code editor, .tab-in, wiki 3-zone) ← HEAD
-1053a9c Phase 5-F: personal wiki (auto-articles, queue, viewer, animation)
-62e26fb Phase 5-E: Terminal 2.0 (tree/editor/history+undo), edit_note, backup
-933ef4d Phase 5-D: settings x3 tabs, profile APIs, key liveness check
-31a4787 Phase 5-C: onboarding hero + step glyphs + slide/fade transitions
-06a3b63 Phase 5-B: model registry, chat quick-switcher, settings default-model
-2ded64f Phase 5-A: beta hatnote, greeting removed, typewriter 2.0
-2d7c312 Phase 4-polish ... (логин, SVG-навигация, профильная карточка, композер)
-320cae6 Phase 4-design: full UI transplant from Siberyada/Ivanopedia
-fc63244 Phase 2 · 6417c18/6f02e5d Phase 3 · 4894912 Phase 1 · 713a9ee skeleton
+(этот коммит) Phase 6-O2 часть 2: ритуал «поле → ядро», ачивки-тосты, финальный запуск; fix bind() слайдера ← HEAD
+445da53 Phase 6-O: onboarding 2.0 — слайдер-презентация (5 сцен, орбиты, демо-чат)
+1cd8699 fix(6-W): sidebar tools / wk-shell flex
+1cf529a Phase 6-W: вики = Иванопедия 1:1 (шаблон статьи, backlinks, /api/wiki/backlinks)
+49322f4 Phase 6-T2: drag&drop в дерево vault, create-меню с мини-модалкой
+729e739 Phase 6-T: Терминал 2.1 (md-превью, Ctrl+F, рецепты, undo-дифф)
+52f08cb Phase 6-S2: модалка проектов, страница проекта, пин-индикатор
+1c47f4d Phase 6-S: проекты сессий (+общая инструкция в system-промпт)
+e4d33e9 fix: клики по бета-баннеру (pointer-events)
+… (ранее: 5-A..5-I, 4-design, 1–3)
 ```
 
-Готово: каркас пользователей, онбординг, чат со стримингом, терминал v1,
-модули, дизайн-система, реестр моделей без ox alpha, ui_smoke 30/30.
+Готово: каркас пользователей, онбординг 2.0 («Ритуал запуска»), чат со стримингом,
+Терминал 2.1, вики 1:1, проекты сессий, настройки ×3, ui_smoke 69/69.
 `mock_llm: true` — модели пока заглушки.
 
 ## 3. Дорожная карта
@@ -64,7 +64,10 @@ fc63244 Phase 2 · 6417c18/6f02e5d Phase 3 · 4894912 Phase 1 · 713a9ee skeleto
 
 | G | ✅ | Полировка-1: term-wide каркас, воздух у VAULT, focus-расширение чат-поля, VS Code-редактор (шапка-таб, точка несохранённых, gutter, caret/selection), .tab-in переходы, вики 3 зоны (sidebar/статья/инфобокс) | app.js, monica.css, ui_smoke.js |
 
-**Фаза 5 завершена полностью (A–G).** Следующий шаг — Фаза 6: живые модели.
+**Фаза 5 завершена полностью (A–G).** Фаза 6 в работе: 6-S/6-S2 (проекты) ✅,
+6-T/6-T2 (Терминал 2.1) ✅, 6-W (вики 1:1) ✅, 6-O (онбординг 2.0 + «Ритуал
+запуска»: слайдер, поле→ядро, ачивки, финал) ✅. Остались: 6-M (медиа),
+6-F (хвосты 5-I), живые модели (mock_llm=false), перенос vault, деплой.
 
 После каждой подфазы: расширить `tools/ui_smoke.js`, прогнать, коммит, протокол.
 
