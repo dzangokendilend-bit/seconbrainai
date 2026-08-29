@@ -98,13 +98,13 @@ const consoleErrors = [], badResponses = [];
   ok("6-O3: ядро вспыхнуло после прилёта (.core-flash)",
     await page.$eval("#wcore-orb", el => el.classList.contains("core-flash")).catch(() => false));
   await new Promise(r => setTimeout(r, 600));
-  /* 6-O3: шаг 4 — кольцо модели + свечение от ползунка */
+  /* 6-O4: шаг 4 — пара моделей (провайдер + api_model) */
   await page.click("#w-next");
   await new Promise(r => setTimeout(r, 400));
-  await page.click("#wz .mod .chip");
-  await new Promise(r => setTimeout(r, 350));
-  ok("6-O3: кольцо модели на орбите ядра",
-    await page.$eval("#wcore-ring", el => el.classList.contains("on")).catch(() => false));
+  ok("6-O4: шаг 4 — лёгкая и сложная модели (провайдеры)",
+    (await page.$("#w-light-m")) && (await page.$("#w-smart-m")));
+  await page.type("#w-light-m", "glm-5.3-fast");
+  await page.type("#w-smart-m", "openrouter/auto");
   await page.evaluate(() => {
     const r = document.getElementById("w-load");
     r.value = "10";
@@ -127,11 +127,14 @@ const consoleErrors = [], badResponses = [];
     window.boot = () => { window.__bootCalled = true; };
     launchFinale();
   });
-  await new Promise(r => setTimeout(r, 700)); /* 6-O3: сбор спутников 420ms + появление финала */
+  await new Promise(r => setTimeout(r, 700)); /* сбор спутников 420ms + появление финала */
   ok("6-O2: финальная сцена — глобус и ускоренные орбиты",
     (await page.$("#finale .fin-core .globe")) && (await page.$("#finale .fin-orbs .ho")));
-  ok("6-O2: финальная сцена — «Мозг запущен»", await page.$("#finale .fin-t"));
+  ok("6-O2: финальная сцена — отсчёт 3..2..1", await page.$("#fin-count"));
   await new Promise(r => setTimeout(r, 2400));
+  ok("6-O2: финал — конфетти и «Вы зарегистрировались!»",
+    (await page.$("#fin-t")) && (await page.$("#fin-conf i")));
+  await new Promise(r => setTimeout(r, 2600));
   ok("6-O2: финал закрылся и передал управление (boot-заглушка вызвана)",
     await page.evaluate(() => window.__bootCalled === true).catch(() => false));
   await page.goto(BASE, {waitUntil: "networkidle0", timeout: 15000});

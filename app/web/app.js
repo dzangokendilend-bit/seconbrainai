@@ -100,12 +100,18 @@ function renderLogin() {
 }
 
 /* ── онбординг: 7 шагов (порядок Ивана) ── */
-const W = {step: 1, source: "", purpose: "", username: "", language: "ru", model: "",
+const W = {step: 1, source: "", purpose: "", username: "", language: "ru",
+  model: "gpt-5.6-luna",
+  light: {provider: "glm", api_model: ""},
+  smart: {provider: "smart", api_model: ""},
   daily_load: 5, avatar: null,
   modules: {wikipedia: true, telegram: false, analytics: false},
   analytics_unlocked: false, analytics_password: "",
   keys: {glm: "", smart: "", luna: ""}, password: "", hint: ""};
 let CFGM = null;
+/* 6-O4: провайдеры для кастомных моделей + мета языков (флаги) */
+const PROVIDERS = {glm: "GLM", smart: "OpenRouter", luna: "Luna"};
+const LANG_META = {ru: ["🇷🇺", "Русский"], ua: ["🇺🇦", "Українська"], en: ["🇬🇧", "English"]};
 
 /* ── Фаза 5-B: реестр моделей во фронте ── */
 async function ensureCFGM() {
@@ -238,6 +244,8 @@ function renderHeroSlider(wz) {
   };
   /* $() ждёт голый id — срезаем ведущий "#" (без этого кнопки слайдера мертвы) */
   const bind = (id, fn) => { const el = $(id.replace(/^#/, "")); if (el) el.onclick = fn; };
+  /* баг-1: «Назад» на сцене пробуждения — явная привязка (дублирует w-exit) */
+  bind("#w-exit", () => { wDraftSave(); renderLogin(); });
   bind("#hz-next", () => go(HZ.slide + 1));
   bind("#hz-next1", () => go(HZ.slide + 1));
   bind("#hz-next2", () => go(HZ.slide + 1));
@@ -380,10 +388,10 @@ function setRing(color) {
 }
 function setShield(on) { const s = $("wcore-shield"); if (s) s.classList.toggle("on", !!on); }
 function coreAvatar(dataUrl) {
+  /* баг-5: аватар замощает глобус и остаётся до конца регистрации */
   const a = $("wcore-ava"), o = $("wcore-orb");
   if (!a || !o || !dataUrl) return;
   a.src = dataUrl; a.hidden = false; o.classList.add("show-ava");
-  setTimeout(() => { a.hidden = true; o.classList.remove("show-ava"); }, 1500);
 }
 /* полёт точки «действие → ядро» (шаги 2/3/4/6) */
 function coreFly(fromEl, cls) {
@@ -424,25 +432,58 @@ function removeSatellite(name) {
   s.classList.add("bye");
   setTimeout(() => { s.classList.remove("filled", "bye"); s.textContent = ""; }, 380);
 }
-/* финальный запуск: спутники слетаются в ядро → глобус светом → чат */
+/* финальный запуск: отсчёт 3..2..1 → конфетти → «Вы зарегистрировались!» → чат */
 function launchFinale() {
   const orb = $("wcore-orb");
   if (orb) orb.classList.add("gather");
-  setTimeout(() => {
-    const f = document.createElement("div");
-    f.id = "finale";
-    f.innerHTML = '<div class="fin-orbs" aria-hidden="true"><i class="ho o1"></i>' +
-      '<i class="ho o2"></i><i class="ho o3"></i></div>' +
-      '<div class="fin-core">' + heroGlobeSvg("fin") + "</div>" +
-      '<div class="fin-t">Мозг запущен</div>';
-    document.body.appendChild(f);
-    setTimeout(() => f.classList.add("out"), 1900);
-    setTimeout(() => { f.remove(); boot(); }, 2400);
-  }, orb ? 420 : 0);
+  const f = document.createElement("div");
+  f.id = "finale";
+  f.innerHTML = '<div class="fin-orbs" aria-hidden="true"><i class="ho o1"></i>' +
+    '<i class="ho o2"></i><i class="ho o3"></i></div>' +
+    '<div class="fin-core">' + heroGlobeSvg("fin") + "</div>" +
+    '<div class="fin-count" id="fin-count">3</div>' +
+    '<div class="fin-t hidden" id="fin-t"></div>' +
+    '<div class="fin-confetti" id="fin-conf"></div>';
+  document.body.appendChild(f);
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let n = 3;
+  const tick = () => {
+    const c = $("fin-count");
+    if (!c) return;
+    if (n > 0) { c.textContent = n--; setTimeout(tick, 700); return; }
+    /* барабанная дробь → конфетти + приветствие */
+    c.classList.add("hidden");
+    const t = $("fin-t");
+    t.classList.remove("hidden");
+    t.innerHTML = "🎉 Вы зарегистрировались!<br><b>Ура, " + esc(W.username) + "</b> — спасибо!";
+    if (!reduced) confettiBurst();
+    setTimeout(() => f.classList.add("out"), reduced ? 1200 : 2600);
+    setTimeout(() => { f.remove(); boot(); }, reduced ? 2600 : 2900);
+  };
+  setTimeout(tick, orb ? 420 : 0);
+}
+function confettiBurst() {
+  const box = $("fin-conf");
+  if (!box) return;
+  const colors = ["#8fb4ff", "#b9a3ff", "#d0a04a", "#6be08a", "#e06c75"];
+  for (let i = 0; i < 46; i++) {
+    const p = document.createElement("i");
+    p.style.left = (50 + (Math.random() * 30 - 15)) + "%";
+    p.style.background = colors[i % colors.length];
+    p.style.animationDelay = (Math.random() * .5) + "s";
+    p.style.animationDuration = (1.6 + Math.random() * 1.4) + "s";
+    p.style.setProperty("--cx", (Math.random() * 2 - 1).toFixed(2));
+    p.style.setProperty("--rot", (Math.random() * 720 - 360) + "deg");
+    box.appendChild(p);
+  }
 }
 
 function renderW() {
   const wz = $("wz");
+  /* баг-2: каскад и .wz-in — только при смене шага, не при перерисовке выбора */
+  const stepChanged = wz.dataset.step !== String(W.step);
+  wz.dataset.step = String(W.step);
+  wz.classList.toggle("wz-anim", stepChanged);
   coreShowStep(); /* 6-O3: ядро живёт на шагах 2–7 */
   if (W.step === 1) {
     /* 6-O: онбординг 2.0 — слайдер-презентация продукта */
@@ -466,9 +507,16 @@ function renderW() {
   } else if (W.step === 3) {
     wz.innerHTML = wHead("Профиль") +
       '<label>Юзернейм (латиница, 3-24)</label><input class="minput" id="w-user" type="text" value="' + W.username + '">' +
-      '<label>Язык интерфейса</label><select class="minput" id="w-lang">' +
-      CFGM.languages.map(l => '<option' + (W.language === l ? " selected" : "") + ">" + l + "</option>").join("") + "</select>" +
+      /* баг-3/4: стилизованный выбор языка с флагами вместо нативного select */
+      '<label>Язык интерфейса</label><div id="w-lang" class="langrow">' +
+      CFGM.languages.map(l => {
+        const f = LANG_META[l] || ["🏳️", l];
+        return '<span class="chip' + (W.language === l ? " sel" : "") + '" data-l="' + l + '">' +
+          f[0] + " " + f[1] + "</span>";
+      }).join("") + "</div>" +
       '<label>Аватарка (необязательно, до 300 КБ)</label><input id="w-ava" type="file" accept="image/png,image/jpeg">' + wNav();
+    $("w-lang").querySelectorAll(".chip").forEach(c =>
+      c.onclick = () => { W.language = c.dataset.l; renderW(); });
     $("w-ava").onchange = () => {
       const f = $("w-ava").files[0];
       if (!f) return;
@@ -485,30 +533,42 @@ function renderW() {
     });
     wBind(async () => {
       W.username = $("w-user").value.trim();
-      W.language = $("w-lang").value;
       const r = await api("/api/check-username", {username: W.username});
       return r.data.ok ? null : (r.data.error || "юзернейм не подходит");
     });
   } else if (W.step === 4) {
-    wz.innerHTML = wHead("Основная модель") +
-      CFGM.models.map(m => '<div class="mod"><div><div class="t">' + m.name + '</div><div class="d">' + m.role +
-        (m.desc ? " · " + m.desc : "") +
-        '</div></div><span class="chip' + (W.model === m.id ? " sel" : "") + '" data-id="' + m.id + '">выбрать</span></div>').join("") +
+    /* 6-O4: пара «лёгкая + сложная» модель — провайдер + ручной api_model */
+    wz.innerHTML = wHead("Модели") +
+      '<div class="mod2"><div class="modcol"><div class="t">⚡ Лёгкая модель</div>' +
+      '<div class="d">повседневное общение в чате</div>' +
+      '<div class="provrow" data-k="light">' + Object.keys(PROVIDERS).map(p =>
+        '<span class="chip' + (W.light.provider === p ? " sel" : "") + '" data-p="' + p + '">' + PROVIDERS[p] + "</span>").join("") + "</div>" +
+      '<input class="minput" id="w-light-m" placeholder="id модели у провайдера, напр. glm-5.3-fast" value="' + esc(W.light.api_model) + '"></div>' +
+      '<div class="modcol"><div class="t">🧠 Сложная модель</div>' +
+      '<div class="d">хранилище, терминал и режим pro</div>' +
+      '<div class="provrow" data-k="smart">' + Object.keys(PROVIDERS).map(p =>
+        '<span class="chip' + (W.smart.provider === p ? " sel" : "") + '" data-p="' + p + '">' + PROVIDERS[p] + "</span>").join("") + "</div>" +
+      '<input class="minput" id="w-smart-m" placeholder="id модели у провайдера (напр. openrouter/auto)" value="' + esc(W.smart.api_model) + '"></div></div>' +
       '<label>Сколько информации планируешь заносить в день</label>' +
       '<input type="range" id="w-load" min="1" max="10" value="' + W.daily_load + '">' +
       '<div class="sub">нагрузка: <b id="w-lv">' + W.daily_load + "</b>/10</div>" + wNav();
-    wz.querySelectorAll(".chip").forEach(c => c.onclick = () => {
-      W.model = c.dataset.id;
-      const i = CFGM.models.findIndex(m => m.id === W.model);
-      setRing(WCORE_PAL[(i < 0 ? 0 : i) % WCORE_PAL.length]); /* 6-O3: кольцо модели */
-      coreFly(c);
-      renderW();
+    ["light", "smart"].forEach(k => {
+      wz.querySelector('[data-k="' + k + '"]').querySelectorAll(".chip").forEach(c =>
+        c.onclick = () => { W[k].provider = c.dataset.p; renderW(); });
     });
+    $("w-light-m").oninput = () => W.light.api_model = $("w-light-m").value.trim();
+    $("w-smart-m").oninput = () => W.smart.api_model = $("w-smart-m").value.trim();
     $("w-load").oninput = () => {
       W.daily_load = +$("w-load").value; $("w-lv").textContent = W.daily_load;
       setCoreGlow((W.daily_load - 1) / 9); /* 6-O3: свечение = нагрузка */
     };
-    wBind(async () => W.model ? null : "выбери модель");
+    wBind(async () => {
+      W.light.api_model = $("w-light-m").value.trim();
+      W.smart.api_model = $("w-smart-m").value.trim();
+      if (!W.light.api_model) return "впиши id лёгкой модели (например glm-5.3-fast)";
+      if (!W.smart.api_model) return "впиши id сложной модели (напр. openrouter/auto)";
+      return null;
+    });
   } else if (W.step === 5) {
     const names = {wikipedia: ["Википедия", "поиск по твоим заметкам, сводки, выжимки"],
       telegram: ["Telegram-бот", "мысли, голосовые, файлы — прямо в базу"],
@@ -565,7 +625,8 @@ function renderW() {
       '<label>Пароль (мин. 6 символов)</label><input class="minput" type="password" id="w-pass">' +
       '<label>Подсказка к паролю</label><input class="minput" id="w-hint" value="' + W.hint + '">' +
       '<div class="sum">Юзернейм: <b>' + W.username + '</b><br>Откуда: <b>' + (W.source || "-") +
-      '</b> · модель: <b>' + W.model + '</b> · нагрузка: <b>' + W.daily_load + '/10</b><br>Модули: <b>' +
+      '</b> · модели: <b>' + W.light.provider + "/" + W.light.api_model + " + " +
+      W.smart.provider + "/" + W.smart.api_model + '</b> · нагрузка: <b>' + W.daily_load + '/10</b><br>Модули: <b>' +
       Object.keys(W.modules).filter(k => W.modules[k]).join(", ") + '</b><br>Ключи: <b>' +
       Object.keys(W.keys).filter(k => W.keys[k]).join(", ") + "</b></div>" + wNav();
     $("w-hint").oninput = () => W.hint = $("w-hint").value;
@@ -578,7 +639,8 @@ function renderW() {
       const r = await api("/api/onboarding/complete", {
         username: W.username, password: W.password, hint: W.hint, avatar: W.avatar,
         survey: {source: W.source, purpose: W.purpose},
-        prefs: {language: W.language, model: W.model, daily_load: W.daily_load},
+        prefs: {language: W.language, model: W.model, daily_load: W.daily_load,
+          light: W.light, smart: W.smart},
         modules: W.modules, analytics_password: W.analytics_password, keys: W.keys});
       if (r.data.ok) { wDraftClear(); launchFinale(); return null; }
       return r.data.error || "ошибка сохранения";
@@ -626,11 +688,14 @@ function sessSave() {
 }
 function sessEnsure() {
   if (!SESS.cur) {
+    /* баг-13: сессия, созданная внутри проекта, наследует его; баг-18: сразу в списке */
     SESS.cur = {id: Date.now(), title: "Новая сессия",
       started: new Date().toISOString(),
       ts: new Date().toLocaleString("ru-RU", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"}),
       pinned: false, projId: PROJ.filter, msgs: []};
     SESS.list.push(SESS.cur);
+    sessSave();
+    drawSess();
   }
   return SESS.cur;
 }
@@ -699,9 +764,10 @@ function projModal(p, onSaved) {
     PROJ_COLORS.map(c => '<span class="swatch' + ((p ? p.color : PROJ_COLORS[0]) === c ? " on" : "") +
       '" data-c="' + c + '" style="background:' + c + '"></span>').join("") + "</div>" +
     '<label>Общая инструкция для Моники</label>' +
-    '<textarea class="minput" id="pm-instr" rows="3" style="height:auto;line-height:1.45" ' +
+    '<textarea class="minput" id="pm-instr" rows="3" style="height:auto;line-height:1.45;resize:none" ' +
     'placeholder="например: мы учим английский — отвечай частью на английском">' + esc(p ? p.instruction : "") + "</textarea>" +
-    '<div class="row"><button class="mbtn" id="pm-cancel">Отмена</button>' +
+    '<div class="row" style="justify-content:flex-end">' +
+    '<button class="mbtn" id="pm-cancel">Отмена</button>' +
     '<button class="mbtn acc" id="pm-save">' + (isNew ? "Создать" : "Сохранить") + "</button></div></div>";
   document.body.appendChild(ov);
   let color = p ? p.color : PROJ_COLORS[0];
@@ -760,11 +826,14 @@ function openProjPage(id) {
   $("pp-back").onclick = () => openTab("chat");
   $("pp-settings").onclick = () => projModal(p, () => openProjPage(id));
   $("pp-new").onclick = () => {
-    const f = PROJ.filter;
-    PROJ.filter = id;
-    newSess();
-    PROJ.filter = f;
-    if (SESS.cur) openSess(SESS.cur.id);
+    /* баг-17: сессия создаётся сразу в проекте и остаётся в списке */
+    const s = {id: Date.now(), title: "Новая сессия",
+      started: new Date().toISOString(),
+      ts: new Date().toLocaleString("ru-RU", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"}),
+      pinned: false, projId: id, msgs: []};
+    SESS.list.push(s);
+    sessSave();
+    openSess(s.id);
   };
   $("m-body").querySelectorAll(".pcard[data-id]").forEach(c =>
     c.onclick = () => openSess(+c.dataset.id));
@@ -807,6 +876,8 @@ function sessMenu(id, anchor) {
       sessSave(); drawSess();
       if (SESS.cur && SESS.cur.id === id) openSess(id);
     } else if (a === "del") {
+      /* фича 19: перед удалением сессия сохраняется в vault/inbox */
+      archiveSess(s);
       SESS.list = SESS.list.filter(x => x.id !== id);
       if (SESS.cur && SESS.cur.id === id) { SESS.cur = null; CHAT_HIST = []; openTab("chat"); }
       sessSave(); drawSess();
@@ -865,6 +936,8 @@ function openSess(id) {
   SESS.cur = s;
   CHAT_HIST = s.msgs.slice();
   openTab("chat", {skipAnim: true});
+  /* баг-12: заголовок сессии — typewriter, остаётся до смены сессии */
+  sessTitleType(s.title || "Новая сессия");
   /* 6.10: дата начала сессии в подзаголовке */
   if (s.started) {
     const d = new Date(s.started);
@@ -890,10 +963,29 @@ function openSess(id) {
   if (cnt) cnt.textContent = s.msgs.length;
 }
 function newSess() {
+  /* баг-16/17/18: новая сессия сразу видима в списке и привязана к проекту */
   SESS.cur = null;
   CHAT_HIST = [];
   openTab("chat");
   drawSess();
+}
+/* баг-12: заголовок сессии печатается и остаётся (вместо цикла «С чего начнём») */
+let SESS_TW = null;
+function sessTitleType(title) {
+  if (TW_TIMER) { clearInterval(TW_TIMER); clearTimeout(TW_TIMER); TW_TIMER = null; }
+  if (SESS_TW) { clearTimeout(SESS_TW); SESS_TW = null; }
+  const el = $("m-title");
+  if (!el) return;
+  el.classList.remove("tw"); void el.offsetWidth; el.classList.add("tw");
+  let k = 0;
+  const step = () => {
+    if (!document.getElementById("m-title")) return;
+    el.innerHTML = esc(title.slice(0, k)) + (k < title.length ? '<span class="caret"></span>' : "");
+    if (k >= title.length) return;
+    k++;
+    SESS_TW = setTimeout(step, 55 + Math.random() * 30);
+  };
+  step();
 }
 
 function renderShell() {
@@ -943,6 +1035,9 @@ let TW_TIMER = null;
 function setTitleTab(tab) {
   if (TW_TIMER) { clearInterval(TW_TIMER); clearTimeout(TW_TIMER); TW_TIMER = null; }
   const el = $("m-title");
+  /* баг-12: в чате с выбранной сессией заголовок = название сессии (не цикл фраз) */
+  if (tab === "chat" && SESS.cur) { sessTitleType(SESS.cur.title || "Новая сессия"); return; }
+  if (SESS_TW) { clearTimeout(SESS_TW); SESS_TW = null; }
   if (tab !== "chat") { el.textContent = TITLES[tab] || tab; return; }
   let pi = 0;
   const cycle = () => {
@@ -989,12 +1084,19 @@ function openTab(tab, opts) {
 }
 
 /* ── чат: лента, пустой экран с подсказками, стриминг, thinking-фразы ── */
-const THINK = ["Думаю…", "Ищу информацию в архиве…", "Сверяю факты и связи…", "Перечитываю заметки…"];
+/* баг-11: контекстные фразы «думаю» — системный стиль, анимация точек */
+const THINK = {
+  chat: ["Думаю…", "Ищу информацию в архиве…", "Сверяю факты и связи…", "Перечитываю заметки…"],
+  term: ["Планирую операции…", "Проверяю структуру vault…", "Сверяюсь с белым списком…"],
+  err: ["Перезапускаю запрос…", "Разбираюсь в ошибке…"]
+};
 const SUGGESTIONS = ["Что вика знает обо мне?", "Разбери мой последний день",
   "Создай заметку идеи/план на неделю", "Какие у меня открытые вопросы?"];
 let SUG_SHOWN = true;
 
 function tabChat(p) {
+  /* баг-16: реплики показываются только когда выбрана сессия */
+  if (!SESS.cur) CHAT_HIST = [];
   $("m-body").innerHTML =
     '<div id="chat-log" class="cs-log"></div>' +
     '<div id="cs-empty" class="cs-empty"><div class="cs-empty-t">С чего начнём?</div>' +
@@ -1092,17 +1194,19 @@ function addMsg(role, text, opts) {
   return d;
 }
 
-function addTyping() {
+function addTyping(kind) {
+  /* баг-11: «Думаю…» — системный текст: приглушён, с анимацией, фразы по контексту */
   hideEmpty();
   const log = $("chat-log") || $("tlog");
   const d = document.createElement("div");
-  d.className = "chat-msg bot typing";
-  d.innerHTML = '<span class="tp-phrase">' + THINK[0] + '</span><span class="typing-dots"><i></i><i></i><i></i></span>';
+  d.className = "chat-msg bot typing sysnote";
+  const pool = THINK[kind] || THINK.chat;
+  d.innerHTML = '<span class="tp-phrase">' + pool[0] + '</span><span class="typing-dots"><i></i><i></i><i></i></span>';
   log.appendChild(d);
   log.scrollTop = log.scrollHeight;
   const ph = d.querySelector(".tp-phrase");
   let i = 0;
-  const rot = setInterval(() => { i = (i + 1) % THINK.length; if (ph) ph.textContent = THINK[i]; }, 1600);
+  const rot = setInterval(() => { i = (i + 1) % pool.length; if (ph) ph.textContent = pool[i]; }, 1600);
   return {el: d, stop: () => clearInterval(rot)};
 }
 
@@ -1113,7 +1217,7 @@ async function chatTurn(text) {
   CHAT_HIST.push({role: "user", content: text});
   sessTrack("user", text);
   LAST_MSG = text;
-  const tp = addTyping();
+  const tp = addTyping("chat");
   try {
     const r = await fetch("/api/chat/stream", {
       method: "POST", headers: {"Content-Type": "application/json"},
@@ -1141,11 +1245,20 @@ async function chatTurn(text) {
   } catch (e) {
     tp.stop();
     const b = addMsg("bot", "⚠️ " + (e.message || e));
+    b.classList.add("sysnote");
     const rb = document.createElement("button");
     rb.className = "cs-act"; rb.textContent = "Повторить";
     rb.onclick = () => { b.remove(); chatTurn(text); };
     b.appendChild(rb);
   }
+}
+/* фича 19: сессия сохраняется в vault/inbox как .md */
+async function archiveSess(s) {
+  if (!s || !s.msgs || !s.msgs.length) return;
+  try {
+    await api("/api/session/archive", {title: s.title || "сессия",
+      started: s.started, msgs: s.msgs});
+  } catch (e) { /* архивация не блокирует работу чата */ }
 }
 
 /* ── терминал 2.0: дерево / чат⇄редактор / лог изменений (Фаза 5-E + Полировка-1) ── */
@@ -1572,7 +1685,7 @@ function addTMsg(role, text) {
 }
 
 async function termTurn(text) {
-  const tp = addTyping();
+  const tp = addTyping("term");
   try {
     const r = await api("/api/terminal", {message: text});
     tp.stop();

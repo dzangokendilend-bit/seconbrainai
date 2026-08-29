@@ -278,16 +278,17 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 .wsat.bye{opacity:0;transform:rotate(var(--sa,0deg)) translate(44px) rotate(calc(var(--sa,0deg)*-1)) scale(.4);
   transition:.35s ease}
 .wcore-cap{font-size:11.5px;color:var(--muted);letter-spacing:.4px;min-height:16px;text-align:center}
-/* каскадное появление элементов формы шага */
-#wz > *{animation:wz-cascade .32s ease both}
-#wz > *:nth-child(2){animation-delay:.05s}
-#wz > *:nth-child(3){animation-delay:.1s}
-#wz > *:nth-child(4){animation-delay:.1s}
-#wz > *:nth-child(5){animation-delay:.11s}
-#wz > *:nth-child(6){animation-delay:.11s}
-#wz > *:nth-child(7){animation-delay:.16s}
-#wz > *:nth-child(8){animation-delay:.16s}
+/* каскадное появление элементов формы — только при смене шага (.wz-anim) */
+#wz.wz-anim > *{animation:wz-cascade .32s ease both}
+#wz.wz-anim > *:nth-child(2){animation-delay:.05s}
+#wz.wz-anim > *:nth-child(3){animation-delay:.1s}
+#wz.wz-anim > *:nth-child(4){animation-delay:.1s}
+#wz.wz-anim > *:nth-child(5){animation-delay:.11s}
+#wz.wz-anim > *:nth-child(6){animation-delay:.11s}
+#wz.wz-anim > *:nth-child(7){animation-delay:.16s}
+#wz.wz-anim > *:nth-child(8){animation-delay:.16s}
 @keyframes wz-cascade{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){#wz > *{animation:none!important}}
 /* фокус поля: подъём, свечение, подсветка подписи */
 .minput:focus{border-color:rgba(143,180,255,.55);box-shadow:0 0 0 3px rgba(143,180,255,.10);
   transform:translateY(-1px)}
@@ -564,16 +565,72 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 .sessrow .spin:hover{opacity:1}
 .sessrow.pinned .spin{opacity:1}
 .sessrow.pinned .st{color:var(--acc)}
-/* 8.8: баннер сворачивается в бейдж */
+/* 8.8: баннер сворачивается в бейдж (баг-9: замок не наезжает на текст) */
 .beta{position:relative}
 .beta-min{position:absolute;top:8px;right:8px;border:none;background:rgba(255,255,255,.08);
   color:var(--muted);width:22px;height:22px;border-radius:50%;cursor:pointer;
-  font-size:12px;line-height:1;transition:.15s}
+  font-size:12px;line-height:1;transition:.15s;z-index:2}
 .beta-min:hover{background:rgba(255,255,255,.16);color:var(--text)}
-.beta.min{cursor:pointer}
+.beta.min{cursor:pointer;padding:8px 40px 8px 12px;font-size:12px;color:var(--muted)}
 .beta.min h3,.beta.min p{display:none}
-.beta.min{padding:8px 12px;font-size:12px;color:var(--muted)}
 .beta.min::after{content:'тестовый режим · подробнее →'}
+.beta.min .beta-min{position:static;margin-right:8px;vertical-align:middle}
+/* баг-11: «Думаю…» и системные заметки — приглушённый системный стиль */
+.chat-msg.sysnote{background:transparent;border:1px dashed rgba(255,255,255,.14);
+  color:var(--muted);font-size:12px;font-style:italic;padding:7px 13px;
+  box-shadow:none;backdrop-filter:none}
+.chat-msg.sysnote .typing-dots i{background:var(--muted);animation:tp-bounce 1.2s ease-in-out infinite}
+.chat-msg.sysnote .typing-dots i:nth-child(2){animation-delay:.15s}
+.chat-msg.sysnote .typing-dots i:nth-child(3){animation-delay:.3s}
+@keyframes sysnote-pulse{0%,100%{opacity:.55}50%{opacity:.75}}
+.chat-msg.sysnote .tp-phrase{animation:sysnote-pulse 2.4s ease-in-out infinite}
+@media (prefers-reduced-motion: reduce){.chat-msg.sysnote{animation:none}}
+/* баг-14: модалка проекта — кнопки справа, textarea не растягивается */
+.modal{max-width:440px;width:calc(100vw - 40px);max-height:86vh;overflow-y:auto}
+.modal textarea.minput{resize:none;min-height:0;height:auto;max-height:140px;overflow-y:auto;
+  border-radius:var(--r-sm);width:100%}
+.modal .row{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}
+/* баг-7: шаг 5 — карточка модуля: текст слева, переключатель справа, без наложений */
+#wz .mod{display:flex;align-items:center;justify-content:space-between;gap:14px;
+  border:1px solid var(--border);border-radius:var(--r-sm);background:rgba(255,255,255,.03);
+  padding:12px 14px;margin:8px 0}
+#wz .mod .t{font-size:13.5px;font-weight:600}
+#wz .mod .d{font-size:12px;color:var(--muted);margin-top:2px}
+#wz .mod .cs-sw{flex:none}
+/* 6-O4: пара моделей шага 4 + выбор языка флагами */
+.mod2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:6px}
+.modcol{border:1px solid var(--border);border-radius:var(--r-sm);background:rgba(255,255,255,.03);
+  padding:12px;display:flex;flex-direction:column;gap:6px}
+.modcol .t{font-size:13.5px;font-weight:600}
+.modcol .d{font-size:11.5px;color:var(--muted)}
+.provrow{display:flex;gap:6px;flex-wrap:wrap}
+.provrow .chip{margin:0;padding:5px 13px;font-size:12px}
+.langrow{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 12px}
+.langrow .chip{margin:0}
+@media (max-width:640px){.mod2{grid-template-columns:1fr;display:flex;flex-direction:column}}
+/* фича 8: финал — отсчёт и конфетти */
+.fin-count{font-family:var(--serif);font-size:64px;color:var(--text);
+  text-shadow:0 0 30px rgba(143,180,255,.6);animation:fin-count .7s ease}
+@keyframes fin-count{from{opacity:0;transform:scale(1.6)}to{opacity:1;transform:scale(1)}}
+.fin-confetti{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.fin-confetti i{position:absolute;top:-12px;width:8px;height:13px;border-radius:2px;
+  animation:conf-fall linear forwards}
+@keyframes conf-fall{to{transform:translate(calc(var(--cx,0)*160px),105vh) rotate(var(--rot,360deg));opacity:.2}}
+@media (prefers-reduced-motion: reduce){.fin-confetti{display:none}.fin-count{animation:none}}
+/* баг-15: унификация шрифтов — вкладка «Бот» и служебные блоки на var(--ui) */
+#tg-body,#tg-body .sum,#tg-body label,#tg-body .sub{font-family:var(--ui)}
+#tg-body .sum b{font-family:var(--ui)}
+/* баг-10: вики — поисковый бокс и сайдбар в палитре Моники */
+.wk-topbar .searchbox input{background:rgba(255,255,255,.05);border:1px solid var(--border);
+  border-radius:var(--r-pill);color:var(--text);font-family:var(--ui);font-size:13px;
+  padding:8px 16px;outline:none;transition:.15s}
+.wk-topbar .searchbox input:focus{border-color:rgba(143,180,255,.55);
+  box-shadow:0 0 0 3px rgba(143,180,255,.10)}
+.wk-side .sgroup h3{font-family:var(--ui);font-size:10.5px;letter-spacing:.8px;
+  text-transform:uppercase;color:var(--muted)}
+.wk-side .sgroup ul li a{font-family:var(--ui);font-size:13px}
+.wk-side .sub{font-family:var(--ui)}
+@media (max-width:860px){#wcore{display:none!important}}
 /* 6.4: возврат на главную из онбординга */
 .wz-back-row{display:flex;gap:10px;justify-content:center;margin-top:6px}
 .sesslist{display:flex;flex-direction:column;gap:4px;margin-top:6px}

@@ -23,6 +23,19 @@ import tgbot
 COOKIE = "monica_session"
 # Фаза 5-B: карта модель -> сервис генерируется из единого реестра onboarding.MODELS
 MODEL_SERVICE = {m["id"]: m["service"] for m in onboarding.MODELS}
+
+
+def resolve_model(uid, kind="light"):
+    """6-O4: кастомная пара провайдер+api_model из онбординга; иначе реестр.
+    kind: light (повседневный чат) | smart (терминал/хранилище/pro)."""
+    p = auth.load_profile(uid)
+    prefs = (p.get("onboarding", {}).get("prefs") or {})
+    cust = prefs.get(kind) or {}
+    if isinstance(cust, dict) and str(cust.get("api_model") or "").strip():
+        svc = cust.get("provider") if cust.get("provider") in onboarding.KEY_SERVICES else "smart"
+        return svc, str(cust["api_model"]).strip()
+    model = onboarding.normalize_model(prefs.get("model"))
+    return (onboarding.service_for(model) or "luna", onboarding.api_model(model) or model)
 CHAT_SYSTEM = ("Ты — Моника, личный ИИ-ассистент пользователя внутри веб-сервиса Моника. "
                "Дружелюбно, просто, без воды. Помогаешь с заметками, модулями и вопросами. "
                "Если нужен ключ или модуль не включён — подскажи зайти в настройки. "
@@ -339,10 +352,7 @@ class Handler(BaseHTTPRequestHandler):
             if not text:
                 self._json({"error": "пустое сообщение"}, 400)
                 return
-            p = auth.load_profile(uid)
-            model = onboarding.normalize_model(
-                (p.get("onboarding", {}).get("prefs") or {}).get("model"))
-            service = MODEL_SERVICE.get(model, "luna")
+            service, api_mdl = resolve_model(uid, "light")  # 6-O4: лёгкая модель
             user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
             if not user_keys.get(service):
                 self._json({"error": "нет ключа для сервиса " + service + " — добавь в настройках"}, 400)
@@ -358,8 +368,7 @@ class Handler(BaseHTTPRequestHandler):
             if pi:
                 messages[0]["content"] += "\n\nКонтекст проекта пользователя: " + pi
             try:
-                reply = providers.chat(service, user_keys[service],
-                                       onboarding.api_model(model), messages)
+                reply = providers.chat(service, user_keys[service], api_mdl, messages)
             except Exception as e:
                 self._json({"error": "модель недоступна: " + str(e)}, 502)
                 return
@@ -369,7 +378,7 @@ class Handler(BaseHTTPRequestHandler):
                     reply = json.loads(reply).get("reply", reply)
                 except Exception:
                     pass
-            self._json({"reply": reply, "model": model})
+            self._json({"reply": reply, "model": api_mdl})
             return
 
         if path == "/api/chat/stream":
@@ -377,10 +386,7 @@ class Handler(BaseHTTPRequestHandler):
             if not text:
                 self._json({"error": "пустое сообщение"}, 400)
                 return
-            p = auth.load_profile(uid)
-            model = onboarding.normalize_model(
-                (p.get("onboarding", {}).get("prefs") or {}).get("model"))
-            service = MODEL_SERVICE.get(model, "luna")
+            service, api_mdl = resolve_model(uid, "light")  # 6-O4: лёгкая модель
             user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
             if not user_keys.get(service):
                 self._json({"error": "нет ключа для сервиса " + service + " — добавь в настройках"}, 400)
@@ -395,7 +401,6 @@ class Handler(BaseHTTPRequestHandler):
             pi = str(body.get("project_instruction") or "")[:500].strip()
             if pi:
                 messages[0]["content"] += "\n\nКонтекст проекта пользователя: " + pi
-            api_mdl = onboarding.api_model(model)
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
@@ -419,14 +424,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "пустое сообщение"}, 400)
                 return
             user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
-            if not user_keys.get("glm"):
-                self._json({"error": "терминалу нужен ключ GLM — добавь в настройках"}, 400)
+            svc, api_mdl = resolve_model(uid, "smart")  # 6-O4: сложная модель
+            if not user_keys.get(svc):
+                self._json({"error": "терминалу нужен ключ сервиса " + svc + " — добавь в настройках"}, 400)
                 return
             vault = os.path.join(auth.user_dir(uid), "vault")
             messages = [{"role": "system", "content": term.system_prompt(vault)},
                         {"role": "user", "content": text[:4000]}]
             try:
-                raw = providers.chat("glm", user_keys["glm"], "glm-5.3-fast", messages)
+                raw = providers.chat(svc, user_keys[svc], api_mdl, messages)
             except Exception as e:
                 self._json({"error": "модель недоступна: " + str(e)}, 502)
                 return
@@ -454,6 +460,34 @@ class Handler(BaseHTTPRequestHandler):
                 if rec.get("op") == "create_note":
                     mon_mods.enqueue(auth.user_dir(uid), rec["path"])
             self._json({"results": results})
+            return
+
+        if path == "/api/session/archive":
+            # 6-S3: сессия сохраняется в vault/inbox как .md (без записей в history)
+            vault = os.path.join(auth.user_dir(uid), "vault")
+            title = str(body.get("title") or "сессия").strip()[:60] or "сессия"
+            msgs = body.get("msgs") or []
+            if not isinstance(msgs, list) or not msgs:
+                self._json({"error": "пустая сессия"}, 400)
+                return
+            slug = "".join(c if c.isalnum() else "-" for c in title.lower()).strip("-")[:40] or "session"
+            try:
+                full, rel = term.safe_path(vault, "inbox/" + slug + ".md")
+            except ValueError as e:
+                self._json({"error": str(e)}, 400)
+                return
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            lines = ["---", "title: " + title,
+                     "created: " + str(body.get("started") or "")[:10],
+                     "source: сессия с Моникой", "---", "", "# " + title, ""]
+            for m in msgs[-200:]:
+                if not isinstance(m, dict):
+                    continue
+                who = "**Ты**" if m.get("role") == "user" else "**Моника**"
+                lines += ["", who + ": " + str(m.get("content"))[:4000]]
+            with open(full, "w", encoding="utf-8", newline="\n") as f:
+                f.write(("\n".join(lines))[:100_000])
+            self._json({"ok": True, "path": rel})
             return
 
         # ── Фаза 5-E: Терминал 2.0 — дерево/чтение/запись/история/undo ──
