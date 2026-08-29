@@ -1977,27 +1977,79 @@ function setOk(msg) { const e = $("s-err"); if (e) { e.style.color = "#6be08a"; 
 function setFail(msg) { const e = $("s-err"); if (e) { e.style.color = ""; e.textContent = msg; } }
 
 function setTabProfile(p) {
-  /* 6-N: дата создания аккаунта + экспорт данных + сила пароля */
+  /* 6-N2: glassmorphism-профиль — превью аватара, «Применить изменения» */
   $("s-body").innerHTML =
-    '<div class="cs-menu"><div class="cs-menu-h">Аккаунт</div>' +
-    '<div class="mrow" style="padding:8px 12px 12px;justify-content:space-between">' +
-    '<span class="sub" style="margin:0">создан: <b style="color:var(--text)">' +
-    esc(p.created || "—") + "</b></span>" +
+    '<div class="set-card">' +
+    '<div class="set-h">Профиль</div>' +
+    '<div class="ava-row">' +
+    '<div class="ava-pick" id="ava-pick" title="сменить аватар">' +
+    (p.avatar ? '<img src="' + p.avatar + '?t=' + Date.now() + '">' :
+      '<span class="ava-letter">' + esc((p.username || "?")[0].toUpperCase()) + "</span>") +
+    '<span class="ava-ov">📷 сменить</span></div>' +
+    '<input type="file" id="p-ava" accept="image/png,image/jpeg" hidden>' +
+    '<div class="ava-meta"><div class="un-big">' + esc(p.username) + "</div>" +
+    '<span class="sub" style="padding:0">создан: ' + esc(p.created || "—") + "</span>" +
     '<button class="cs-act" id="p-export">⬇ Экспорт данных (zip)</button></div></div>' +
-    '<div class="cs-menu"><div class="cs-menu-h">Юзернейм</div>' +
-    '<div class="mrow" style="padding:4px 12px 12px"><input class="minput" id="p-user" style="margin:0" value="' + esc(p.username) + '">' +
-    '<button class="cs-act primary" id="p-user-go">Сохранить</button></div></div>' +
-    '<div class="cs-menu"><div class="cs-menu-h">Аватарка (png/jpeg, до 300 КБ)</div>' +
-    '<div class="mrow" style="padding:4px 12px 12px"><input id="p-ava" type="file" accept="image/png,image/jpeg">' +
-    '<button class="cs-act primary" id="p-ava-go">Загрузить</button></div></div>' +
-    '<div class="cs-menu"><div class="cs-menu-h">Смена пароля</div>' +
-    '<div style="padding:6px 12px 14px">' +
+    '<label>Юзернейм (латиница, 3-24)</label>' +
+    '<input class="minput" id="p-user" value="' + esc(p.username) + '">' +
+    '<div class="apply-row"><button class="mbtn acc" id="p-apply" disabled>Применить изменения</button>' +
+    '<span class="sub" style="padding:0" id="p-dirty-hint"></span></div></div>' +
+    '<div class="set-card"><div class="set-h">Смена пароля</div>' +
+    '<div style="padding:10px 0 14px">' +
     '<input class="minput" type="password" id="p-old" placeholder="текущий пароль" autocomplete="current-password">' +
     '<input class="minput" type="password" id="p-new" placeholder="новый пароль (мин. 6)" autocomplete="new-password">' +
     '<div class="pw-meter" id="pw-meter" style="display:none"><i></i><span class="sub" id="pw-hint"></span></div>' +
     '<input class="minput" type="password" id="p-new2" placeholder="повтори новый пароль" autocomplete="new-password">' +
-    '<button class="cs-act primary" id="p-pass-go">Сменить пароль</button>' +
-    '<div class="sub" style="margin-top:8px">После смены пароля все устройства выйдут из аккаунта.</div></div></div>';
+    '<div class="apply-row"><button class="mbtn acc" id="p-pass-go">Сменить пароль</button></div>' +
+    '<div class="sub" style="padding:0 16px 4px">После смены пароля все устройства выйдут из аккаунта.</div></div></div>';
+  /* 6-N2: аватар — черновик до «Применить изменения» */
+  let dirtyAva = null;
+  const applyBtn = $("p-apply"), hintEl = $("p-dirty-hint");
+  const markDirty = () => {
+    applyBtn.disabled = false;
+    hintEl.textContent = "есть несохранённые изменения";
+  };
+  $("ava-pick").onclick = () => $("p-ava").click();
+  $("p-ava").onchange = () => {
+    const f = $("p-ava").files[0];
+    if (!f) return;
+    if (f.size > 300 * 1024) return setFail("файл больше 300 КБ");
+    const rd = new FileReader();
+    rd.onload = () => {
+      dirtyAva = rd.result;
+      $("ava-pick").innerHTML = '<img src="' + dirtyAva + '"><span class="ava-ov">📷 сменить</span>';
+      markDirty();
+    };
+    rd.readAsDataURL(f);
+  };
+  $("p-user").addEventListener("input", () => {
+    if ($("p-user").value.trim() !== p.username) markDirty();
+  });
+  /* 6-N2: «Применить изменения» — юзернейм + аватар одной кнопкой */
+  applyBtn.onclick = async () => {
+    applyBtn.disabled = true;
+    const newName = $("p-user").value.trim();
+    if (newName && newName !== p.username) {
+      const r = await api("/api/profile/username", {username: newName});
+      if (r.data.error) { applyBtn.disabled = false; return setFail(r.data.error); }
+      ME.username = r.data.username;
+      p.username = r.data.username;
+      const un = document.querySelector(".profcard .un");
+      if (un) un.textContent = r.data.username;
+      const ub = document.querySelector(".ava-meta .un-big");
+      if (ub) ub.textContent = r.data.username;
+    }
+    if (dirtyAva) {
+      const r = await api("/api/profile/avatar", {avatar: dirtyAva});
+      if (r.data.error) { applyBtn.disabled = false; return setFail(r.data.error); }
+      ME.avatar = "/api/avatar/" + ME.user_id;
+      const pa = document.querySelector(".profcard .pa");
+      if (pa) pa.outerHTML = '<img class="pa" src="' + ME.avatar + '?t=' + Date.now() + '">';
+      dirtyAva = null;
+    }
+    hintEl.textContent = "";
+    setOk("изменения применены");
+  };
   /* 6-N: экспорт данных — zip через /api/profile/export */
   $("p-export").onclick = async () => {
     try {
@@ -2032,26 +2084,7 @@ function setTabProfile(p) {
     hint.textContent = "надёжность: " + lvl[1];
     hint.style.color = lvl[2];
   });
-  $("p-user-go").onclick = async () => {
-    const r = await api("/api/profile/username", {username: $("p-user").value.trim()});
-    if (r.data.error) return setFail(r.data.error);
-    ME.username = r.data.username;
-    const un = document.querySelector(".profcard .un");
-    if (un) un.textContent = r.data.username;
-    setOk("юзернейм обновлён");
-  };
-  $("p-ava-go").onclick = () => {
-    const f = $("p-ava").files[0];
-    if (!f) return setFail("выбери файл");
-    if (f.size > 300 * 1024) return setFail("файл больше 300 КБ");
-    const rd = new FileReader();
-    rd.onload = async () => {
-      const r = await api("/api/profile/avatar", {avatar: rd.result});
-      if (r.data.error) return setFail(r.data.error);
-      setOk("аватарка обновлена — обнови раздел (кнопка слева)");
-    };
-    rd.readAsDataURL(f);
-  };
+  /* p-user-go / p-ava-go удалены (6-N2): всё через «Применить изменения» */
   $("p-pass-go").onclick = async () => {
     if ($("p-new").value !== $("p-new2").value) return setFail("новые пароли не совпадают");
     const r = await api("/api/profile/password",
