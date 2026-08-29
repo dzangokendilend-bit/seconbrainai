@@ -1977,7 +1977,13 @@ function setOk(msg) { const e = $("s-err"); if (e) { e.style.color = "#6be08a"; 
 function setFail(msg) { const e = $("s-err"); if (e) { e.style.color = ""; e.textContent = msg; } }
 
 function setTabProfile(p) {
+  /* 6-N: дата создания аккаунта + экспорт данных + сила пароля */
   $("s-body").innerHTML =
+    '<div class="cs-menu"><div class="cs-menu-h">Аккаунт</div>' +
+    '<div class="mrow" style="padding:8px 12px 12px;justify-content:space-between">' +
+    '<span class="sub" style="margin:0">создан: <b style="color:var(--text)">' +
+    esc(p.created || "—") + "</b></span>" +
+    '<button class="cs-act" id="p-export">⬇ Экспорт данных (zip)</button></div></div>' +
     '<div class="cs-menu"><div class="cs-menu-h">Юзернейм</div>' +
     '<div class="mrow" style="padding:4px 12px 12px"><input class="minput" id="p-user" style="margin:0" value="' + esc(p.username) + '">' +
     '<button class="cs-act primary" id="p-user-go">Сохранить</button></div></div>' +
@@ -1988,9 +1994,44 @@ function setTabProfile(p) {
     '<div style="padding:6px 12px 14px">' +
     '<input class="minput" type="password" id="p-old" placeholder="текущий пароль" autocomplete="current-password">' +
     '<input class="minput" type="password" id="p-new" placeholder="новый пароль (мин. 6)" autocomplete="new-password">' +
+    '<div class="pw-meter" id="pw-meter" style="display:none"><i></i><span class="sub" id="pw-hint"></span></div>' +
     '<input class="minput" type="password" id="p-new2" placeholder="повтори новый пароль" autocomplete="new-password">' +
     '<button class="cs-act primary" id="p-pass-go">Сменить пароль</button>' +
     '<div class="sub" style="margin-top:8px">После смены пароля все устройства выйдут из аккаунта.</div></div></div>';
+  /* 6-N: экспорт данных — zip через /api/profile/export */
+  $("p-export").onclick = async () => {
+    try {
+      const r = await fetch("/api/profile/export", {method: "POST",
+        headers: {"Content-Type": "application/json"}, body: "{}"});
+      if (!r.ok) return setFail("экспорт не удался: HTTP " + r.status);
+      const blob = await r.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "monica-export.zip";
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setOk("архив данных скачан");
+    } catch (e) { setFail("экспорт не удался: " + e); }
+  };
+  /* 6-N: индикатор силы пароля */
+  $("p-new").addEventListener("input", () => {
+    const v = $("p-new").value;
+    const meter = $("pw-meter"), bar = meter.querySelector("i"), hint = $("pw-hint");
+    if (!v) { meter.style.display = "none"; return; }
+    meter.style.display = "flex";
+    let score = 0;
+    if (v.length >= 6) score++;
+    if (v.length >= 10) score++;
+    if (/[a-zа-я]/.test(v) && /[A-ZА-Я]/.test(v)) score++;
+    if (/\d/.test(v)) score++;
+    if (/[^A-Za-zА-Яа-я0-9]/.test(v)) score++;
+    const lvl = score <= 1 ? ["20%", "слабый", "var(--red)"]
+      : score <= 3 ? ["55%", "средний", "#d0a04a"] : ["100%", "надёжный", "#6be08a"];
+    bar.style.width = lvl[0];
+    bar.style.background = lvl[2];
+    hint.textContent = "надёжность: " + lvl[1];
+    hint.style.color = lvl[2];
+  });
   $("p-user-go").onclick = async () => {
     const r = await api("/api/profile/username", {username: $("p-user").value.trim()});
     if (r.data.error) return setFail(r.data.error);
@@ -2023,18 +2064,52 @@ function setTabProfile(p) {
 
 function setTabKeys(p) {
   const kmask = p.keys_masked || {};
+  const kstat = p.keys_status || {};
+  const dot = s => {
+    if (!kmask[s]) return '<span class="kdot none" title="не задан"></span>';
+    const st = kstat[s];
+    if (!st) return '<span class="kdot unknown" title="не проверялся"></span>';
+    return st.ok ? '<span class="kdot ok" title="проверен: живой"></span>'
+      : '<span class="kdot bad" title="проверка не прошла"></span>';
+  };
+  const prefs = (p.onboarding || {}).prefs || {};
+  const lc = prefs.light || {}, sc = prefs.smart || {};
   $("s-body").innerHTML =
-    '<div class="cs-menu"><div class="cs-menu-h">Модель по умолчанию</div>' +
+    '<div class="cs-menu"><div class="cs-menu-h">Пара моделей (из онбординга)</div>' +
+    '<div style="padding:8px 12px 12px">' +
+    '<label>⚡ Лёгкая — повседневный чат</label>' +
+    '<div class="mrow" style="padding:0 0 8px"><select class="minput" id="cm-light-p" style="margin:0;width:auto">' +
+    Object.keys(SVC_NAMES).map(s => '<option value="' + s + '"' +
+      (lc.provider === s ? " selected" : "") + ">" + SVC_NAMES[s] + "</option>").join("") + "</select>" +
+    '<input class="minput" id="cm-light-m" style="margin:0" placeholder="api_model" value="' + esc(lc.api_model || "") + '"></div>' +
+    '<label>🧠 Сложная — хранилище и pro</label>' +
+    '<div class="mrow" style="padding:0 0 8px"><select class="minput" id="cm-smart-p" style="margin:0;width:auto">' +
+    Object.keys(SVC_NAMES).map(s => '<option value="' + s + '"' +
+      (sc.provider === s ? " selected" : "") + ">" + SVC_NAMES[s] + "</option>").join("") + "</select>" +
+    '<input class="minput" id="cm-smart-m" style="margin:0" placeholder="api_model" value="' + esc(sc.api_model || "") + '"></div>' +
+    '<button class="cs-act primary" id="cm-save">Сохранить модели</button></div></div>' +
+    '<div class="cs-menu"><div class="cs-menu-h">Модель по умолчанию (реестр)</div>' +
     '<div id="s-mlist" style="padding:8px 12px 12px"></div></div>' +
     '<div class="cs-menu"><div class="cs-menu-h">Ключи API (маскированы)</div>' +
     Object.keys(SVC_NAMES).map(s =>
-      '<div class="cs-menu-row">' + SVC_NAMES[s] + ': <b>' + (kmask[s] || "не задан") + '</b>' +
+      '<div class="cs-menu-row">' + dot(s) + SVC_NAMES[s] + ': <b>' + (kmask[s] || "не задан") + '</b>' +
       '<span><button class="cs-act" data-check="' + s + '">проверить</button> ' +
       '<button class="cs-act" data-s="' + s + '">сменить</button></span></div>').join("") +
     '<div class="mrow" style="padding:4px 12px 12px"><select class="minput" id="k-svc" style="margin:0;width:auto">' +
     Object.keys(SVC_NAMES).map(s => "<option>" + s + "</option>").join("") + "</select>" +
     '<input class="minput" id="s-val" style="margin:0" placeholder="новое значение ключа">' +
     '<button class="cs-act primary" id="s-apply">Применить</button></div></div>';
+  /* 6-N: сохранение пары моделей */
+  $("cm-save").onclick = async () => {
+    const r = await api("/api/prefs/custom-models", {
+      light: {provider: $("cm-light-p").value, api_model: $("cm-light-m").value.trim()},
+      smart: {provider: $("cm-smart-p").value, api_model: $("cm-smart-m").value.trim()}});
+    if (r.data.ok) {
+      ME.onboarding.prefs.light = r.data.light;
+      ME.onboarding.prefs.smart = r.data.smart;
+      setOk("пара моделей сохранена");
+    } else setFail(r.data.error || "ошибка сохранения");
+  };
   /* Фаза 5-B: секция «Модель по умолчанию» из реестра */
   ensureCFGM().then(c => {
     const box = $("s-mlist");

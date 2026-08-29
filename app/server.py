@@ -1,11 +1,13 @@
 # Моника 1.0 — точка входа. Фаза 1: пользователи и онбординг.
 import base64
+import io
 import json
 import os
 import re
 import sys
 import time
 import urllib.parse
+import zipfile
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -98,9 +100,11 @@ class Handler(BaseHTTPRequestHandler):
                 "user_id": uid, "username": p["username"],
                 "avatar": "/api/avatar/" + uid if p.get("avatar") else None,
                 "hint": p.get("hint", ""),
+                "created": p.get("created", ""),
                 "modules": p.get("modules", {}),
                 "onboarding": p.get("onboarding", {}),
-                "keys_masked": masked}})
+                "keys_masked": masked,
+                "keys_status": p.get("keys_status", {})}})
             return
         if path.startswith("/api/avatar/"):
             uid = path.split("/")[-1]
@@ -306,6 +310,51 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "username": p["username"]})
             return
 
+        if path == "/api/prefs/custom-models":
+            # 6-N: правка пары light/smart из настроек (синхронно с онбордингом)
+            p = auth.load_profile(uid)
+            prefs = p.setdefault("onboarding", {}).setdefault("prefs", {})
+            for kind in ("light", "smart"):
+                cust = body.get(kind)
+                if isinstance(cust, dict):
+                    prefs[kind] = {
+                        "provider": cust.get("provider") if cust.get("provider") in onboarding.KEY_SERVICES else prefs.get(kind, {}).get("provider", "glm"),
+                        "api_model": str(cust.get("api_model") or "").strip()[:120]}
+            auth.save_profile(uid, p)
+            self._json({"ok": True, "light": prefs.get("light"), "smart": prefs.get("smart")})
+            return
+
+        if path == "/api/profile/export":
+            # 6-N: экспорт данных — zip (vault + профиль без секретов + история)
+            udir = auth.user_dir(uid)
+            p = auth.load_profile(uid)
+            safe_profile = {k: v for k, v in p.items() if k not in ("keys_status",)}
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+                z.writestr("profile.json", json.dumps(safe_profile, ensure_ascii=False, indent=2))
+                hp = os.path.join(udir, "history.jsonl")
+                if os.path.exists(hp):
+                    z.write(hp, "history.jsonl")
+                vault = os.path.join(udir, "vault")
+                for root, dirs, files in os.walk(vault):
+                    dirs[:] = [d for d in dirs if not d.startswith(".")]
+                    for f in files:
+                        fp = os.path.join(root, f)
+                        rel = os.path.relpath(fp, vault).replace(os.sep, "/")
+                        try:
+                            z.write(fp, "vault/" + rel)
+                        except OSError:
+                            pass
+            data = buf.getvalue()
+            fname = "monica-export-" + time.strftime("%Y%m%d-%H%M") + ".zip"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition", "attachment; filename=" + fname)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+
         if path == "/api/profile/avatar":
             try:
                 name = auth.save_avatar(uid, body.get("avatar"))
@@ -344,6 +393,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "ключ не задан"}, 400)
                 return
             ok, msg = providers.ping(svc, user_keys[svc])
+            # 6-N: статус проверки сохраняется в профиле (для цветных индикаторов)
+            p = auth.load_profile(uid)
+            st = p.setdefault("keys_status", {})
+            st[svc] = {"ok": bool(ok), "ts": time.strftime("%Y-%m-%d %H:%M")}
+            auth.save_profile(uid, p)
             self._json({"ok": ok, "message": msg})
             return
 
