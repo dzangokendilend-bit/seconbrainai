@@ -69,8 +69,8 @@ e4d33e9 fix: клики по бета-баннеру (pointer-events)
 | 6-O..O4 | онбординг 2.0 + «Ритуал запуска» | слайдер, живое ядро, ачивки, финал с конфетти, пара моделей | app.js, monica.css, server.py | ✅ |
 | **6-N** | **Настройки 2.0 — наполнение** (приоритет автора) | 1) дата создания аккаунта в Профиле; 2) «Экспорт данных» — zip (vault + профиль + история) через /api/profile/export; 3) индикатор силы пароля при смене; 4) цветовые статусы ключей (проверен/ошибка/не проверялся); 5) показ и правка пары light/smart моделей из онбординга; 6) fix: .cs-menu (absolute из style.css) в настройках → static | server.py (+export, +custom-models, +keys_status), app.js (setTab*), monica.css | ✅ |
 | **6-M** | **Медиа: фото/видео/файлы/голос** | app/media.py: Groq Whisper (голос), ffmpeg-кадры (видео→vision), save_attachment (до 5 файлов ≤10МБ в attachments/); /api/chat(+stream) принимают files[]; композер: активация слотов, превью вложений; ключ groq в KEY_SERVICES | app/media.py (новый), server.py, providers.py, app.js, onboarding.py | ✅ |
-| 6-F | хвосты 5-I | кликабельность @sozrelyy (исправлено в e4d33e9 — проверить), отступы после topbar | app.js, monica.css | ☐ |
-| 7 | боевой режим | mock_llm=false + проверка реальных ключей на всех маршрутах; tools/import_vault.py (импорт .md Ивана); чистка тестовых аккаунтов | config.json, tools/ | ☐ |
+| 6-F | хвосты 5-I | кликабельность @sozrelyy (e4d33e9 + smoke-проверка), отступы — закрыто попутными фиксами | app.js, monica.css | ✅ |
+| 7 | боевой режим | инструменты готовы: tools/import_vault.py (импорт .md с --enqueue/--overwrite), tools/cleanup_users.py (чистка тестеров, dry-run + --delete). Живые модели: переключение mock_llm=false — делает автор при наличии ключей (smoke рассчитан на mock) | config.json, tools/ | ◐ |
 | 8 | деплой | HTTPS/reverse proxy, автозапуск, бэкапы data/ | — | ☐ |
 | 9 | полировка по фидбеку беты | темы, i18n, экспорт заметок, аналитика-визуализации | — | ☐ |
 
