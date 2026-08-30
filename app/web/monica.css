@@ -565,16 +565,24 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 .sessrow .spin:hover{opacity:1}
 .sessrow.pinned .spin{opacity:1}
 .sessrow.pinned .st{color:var(--acc)}
-/* 6-N2: настройки — black glassmorphism */
-#s-body .cs-menu,#s-body .set-card{position:static;z-index:auto;display:block;
+/* 6-N2: настройки — black glassmorphism.
+   ВАЖНО: .cs-menu в style.css — absolute с bottom:calc(100%+10px);right:0
+   (выпадашка чата). В настройках это секции — гасим все сдвиги явно. */
+#s-body .cs-menu,#s-body .set-card{position:relative;z-index:auto;display:block;
+  top:auto;bottom:auto;left:auto;right:auto;
   margin-bottom:14px;border:1px solid var(--border);border-radius:16px;
   background:rgba(14,14,17,.62);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
   box-shadow:0 10px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06);
   overflow:hidden}
-#s-body .cs-menu::before,#s-body .set-card::before{content:"";position:absolute;
+#s-body .set-card::before{content:"";position:absolute;
   inset:0 0 auto;height:1px;background:linear-gradient(90deg,transparent,
   rgba(255,255,255,.18),transparent);pointer-events:none}
-#s-body .cs-menu,#s-body .set-card{position:relative}
+/* вкладки настроек: без серой полосы, кнопки непрозрачные */
+.set-tabs{position:sticky;top:0;z-index:5;background:transparent;
+  padding:10px 0;margin-bottom:12px}
+.set-tab{background:#101014}
+.set-tab:hover{background:#16161c}
+.set-tab.on{background:rgba(143,180,255,.12)}
 .set-h{display:flex;align-items:center;gap:8px;padding:13px 16px 11px;
   font-family:var(--ui);font-size:10.5px;letter-spacing:1px;text-transform:uppercase;
   color:var(--muted);border-bottom:1px solid rgba(255,255,255,.06)}
@@ -601,10 +609,7 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
   justify-content:center;font-size:13px;color:#fff;background:rgba(0,0,0,.6);
   opacity:0;transition:.2s}
 .ava-pick:hover .ava-ov{opacity:1}
-/* вкладки настроек: непрозрачный фон, прилипают при скролле (не просвечивают) */
-.set-tabs{position:sticky;top:0;z-index:5;background:#0b0b0e;
-  padding:10px 0;margin-bottom:12px}
-/* редактор терминала: на всю высоту панели + ресайз вниз за хендл */
+/* редактор терминала: на всю высоту панели */
 #teditor,#tchat{display:flex;flex-direction:column;flex:1;min-height:0}
 .te-resize{flex:none;height:7px;cursor:ns-resize;display:flex;align-items:center;
   justify-content:center;margin:2px 0}
