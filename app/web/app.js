@@ -1117,9 +1117,14 @@ function tabChat(p) {
     "<p>Моника работает в тестовом режиме: это закрытая бета для друзей и бета-тестеров, часть функций ещё в разработке, возможны странности.</p>" +
     '<p>Нашёл баг или есть идея — пиши автору в Telegram: <a href="https://t.me/sozrelyy" target="_blank" rel="noopener">@sozrelyy</a>. Баг-репорты и предложения очень помогают.</p>' +
     "<p>Твои заметки и данные принадлежат только тебе.</p></div></div>" +
-    '<div class="cs-bottom"><form id="chat-form"><div class="cs-inputbar">' +
-    '<span class="cs-att" title="скоро: изображения"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M21 15.5 16.5 11 7 19"/></svg></span>' +
-    '<span class="cs-att" title="скоро: файлы"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.05 12.25 20.2a5.5 5.5 0 0 1-7.78-7.78l8.49-8.48a3.67 3.67 0 0 1 5.18 5.18l-8.48 8.49a1.83 1.83 0 0 1-2.6-2.6l7.79-7.78"/></svg></span>' +
+    /* 6-M: активные слоты медиа — изображение и файл */
+    '<div class="cs-bottom"><form id="chat-form">' +
+    '<div id="att-preview" class="att-preview"></div>' +
+    '<input type="file" id="att-img" accept="image/png,image/jpeg,image/webp,image/gif" hidden multiple>' +
+    '<input type="file" id="att-file" hidden multiple>' +
+    '<div class="cs-inputbar">' +
+    '<button type="button" class="cs-att" id="att-img-btn" title="изображение"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M21 15.5 16.5 11 7 19"/></svg></button>' +
+    '<button type="button" class="cs-att" id="att-file-btn" title="файл / аудио / видео"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.05 12.25 20.2a5.5 5.5 0 0 1-7.78-7.78l8.49-8.48a3.67 3.67 0 0 1 5.18 5.18l-8.48 8.49a1.83 1.83 0 0 1-2.6-2.6l7.79-7.78"/></svg></button>' +
     '<textarea id="chat-input" rows="1" placeholder="напиши Монике…"></textarea>' +
     '<button type="submit" class="cs-send" title="Отправить">' + SEND_SVG + "</button>" +
     "</div></form>" +
@@ -1185,7 +1190,39 @@ function tabChat(p) {
   input.addEventListener("keydown", e => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
   });
-  form.onsubmit = e => { e.preventDefault(); const t = input.value.trim(); if (!t) return; input.value = ""; resize(); chatTurn(t); };
+  /* 6-M: вложения — до 5 файлов ≤10МБ, превью-чипы, отправка с сообщением */
+  let PENDING = [];
+  const drawPending = () => {
+    $("att-preview").innerHTML = PENDING.map((f, i) =>
+      '<span class="att-chip">' + (f.mime.startsWith("image/") ? "🖼" : "📎") +
+      " " + esc(f.name.length > 22 ? f.name.slice(0, 20) + "…" : f.name) +
+      '<b data-i="' + i + '" title="убрать">×</b></span>').join("");
+    $("att-preview").querySelectorAll("b").forEach(b => b.onclick = () => {
+      PENDING.splice(+b.dataset.i, 1);
+      drawPending();
+    });
+  };
+  const addFiles = list => {
+    for (const f of Array.from(list || [])) {
+      if (PENDING.length >= 5) { alert("не больше 5 вложений на сообщение"); break; }
+      if (f.size > 10 * 1024 * 1024) { alert("«" + f.name + "» больше 10 МБ"); continue; }
+      PENDING.push({name: f.name, mime: f.type || "application/octet-stream", file: f});
+    }
+    drawPending();
+  };
+  $("att-img-btn").onclick = () => $("att-img").click();
+  $("att-file-btn").onclick = () => $("att-file").click();
+  $("att-img").onchange = e => { addFiles(e.target.files); e.target.value = ""; };
+  $("att-file").onchange = e => { addFiles(e.target.files); e.target.value = ""; };
+  form.onsubmit = e => {
+    e.preventDefault();
+    const t = input.value.trim();
+    if (!t && !PENDING.length) return;
+    const files = PENDING.map(f => ({name: f.name, mime: f.mime, file: f.file}));
+    input.value = ""; resize();
+    PENDING = []; drawPending();
+    chatTurn(t, files);
+  };
 }
 
 function hideEmpty() {
@@ -1225,17 +1262,33 @@ function addTyping(kind) {
 
 let LAST_MSG = null;
 
-async function chatTurn(text) {
-  addMsg("user", text);
-  CHAT_HIST.push({role: "user", content: text});
-  sessTrack("user", text);
+async function chatTurn(text, files) {
+  /* 6-M: вложения читаются в base64 и уходят с сообщением */
+  const payloadFiles = [];
+  for (const f of (files || [])) {
+    try {
+      const data = await new Promise((res, rej) => {
+        const rd = new FileReader();
+        rd.onload = () => res(rd.result);
+        rd.onerror = () => rej(new Error("не прочитан"));
+        rd.readAsDataURL(f.file);
+      });
+      payloadFiles.push({name: f.name, mime: f.mime, data: data});
+    } catch (e) { /* пропустить нечитаемый файл */ }
+  }
+  const userLabel = text + (payloadFiles.length ?
+    "\n📎 " + payloadFiles.map(f => f.name).join(", ") : "");
+  addMsg("user", userLabel);
+  CHAT_HIST.push({role: "user", content: userLabel});
+  sessTrack("user", userLabel);
   LAST_MSG = text;
   const tp = addTyping("chat");
   try {
     const r = await fetch("/api/chat/stream", {
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({message: text, history: CHAT_HIST.slice(-20),
-        project_instruction: curInstr()})});
+        project_instruction: curInstr(),
+        files: payloadFiles.length ? payloadFiles : undefined})});
     if (!r.ok) {
       const e = await r.json().catch(() => ({}));
       throw new Error(e.error || "HTTP " + r.status);

@@ -16,6 +16,7 @@ import auth
 import config
 import history as hist
 import keys as keys_mod
+import media
 import onboarding
 import providers
 import terminal as term
@@ -25,6 +26,24 @@ import tgbot
 COOKIE = "monica_session"
 # Фаза 5-B: карта модель -> сервис генерируется из единого реестра onboarding.MODELS
 MODEL_SERVICE = {m["id"]: m["service"] for m in onboarding.MODELS}
+
+
+def build_user_content(uid, text, files):
+    """6-M: маршрутизация медиа-вложений. Возвращает (content, media_notes).
+    content — строка или массив частей (vision) для сообщения user."""
+    groq_key = keys_mod.load_keys(config.MACHINE_SECRET, uid).get("groq")
+    vision, addon, saved, errors = media.analyze_files(uid, files, groq_key)
+    notes = []
+    if saved:
+        notes.append("Сохранено в attachments: " + ", ".join(saved))
+    if errors:
+        notes.append("⚠️ " + "; ".join(errors))
+    tail = ("\n\n" + addon if addon else "") + ("\n\n" + "\n".join(notes) if notes else "")
+    if vision:
+        content = [{"type": "text", "text": (text or "Опиши вложения.") + tail}] + vision
+    else:
+        content = text + tail
+    return content, "\n".join(notes)
 
 
 def resolve_model(uid, kind="light"):
@@ -42,7 +61,7 @@ CHAT_SYSTEM = ("Ты — Моника, личный ИИ-ассистент по
                "Дружелюбно, просто, без воды. Помогаешь с заметками, модулями и вопросами. "
                "Если нужен ключ или модуль не включён — подскажи зайти в настройки. "
                "Работаешь только с данными этого пользователя.")
-MAX_BODY = 2 * 1024 * 1024  # 2 МБ (аватарки dataURL)
+MAX_BODY = 24 * 1024 * 1024  # 6-M: медиа-вложения (5 файлов ≤10МБ → base64)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -416,7 +435,13 @@ class Handler(BaseHTTPRequestHandler):
             for m in history[-20:]:
                 if isinstance(m, dict) and m.get("role") in ("user", "assistant"):
                     messages.append({"role": m["role"], "content": str(m.get("content"))[:4000]})
-            messages.append({"role": "user", "content": text})
+            # 6-M: медиа-вложения (изображения → vision, аудио → Whisper, файлы → текст)
+            media_notes = ""
+            if body.get("files"):
+                content, media_notes = build_user_content(uid, text, body["files"])
+                messages.append({"role": "user", "content": content})
+            else:
+                messages.append({"role": "user", "content": text})
             # 6-S: общая инструкция проекта (задаётся пользователем в панели проектов)
             pi = str(body.get("project_instruction") or "")[:500].strip()
             if pi:
@@ -432,7 +457,7 @@ class Handler(BaseHTTPRequestHandler):
                     reply = json.loads(reply).get("reply", reply)
                 except Exception:
                     pass
-            self._json({"reply": reply, "model": api_mdl})
+            self._json({"reply": reply, "model": api_mdl, "media_notes": media_notes})
             return
 
         if path == "/api/chat/stream":
@@ -450,7 +475,12 @@ class Handler(BaseHTTPRequestHandler):
             for m in history[-20:]:
                 if isinstance(m, dict) and m.get("role") in ("user", "assistant"):
                     messages.append({"role": m["role"], "content": str(m.get("content"))[:4000]})
-            messages.append({"role": "user", "content": text})
+            # 6-M: медиа-вложения
+            if body.get("files"):
+                content, _notes = build_user_content(uid, text, body["files"])
+                messages.append({"role": "user", "content": content})
+            else:
+                messages.append({"role": "user", "content": text})
             # 6-S: общая инструкция проекта
             pi = str(body.get("project_instruction") or "")[:500].strip()
             if pi:

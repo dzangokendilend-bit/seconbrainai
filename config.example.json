@@ -17,6 +17,10 @@
     "luna": {
       "base_url": "https://api.openai.com/v1/chat/completions",
       "model": "gpt-5.6-luna"
+    },
+    "groq": {
+      "base_url": "https://api.groq.com/openai/v1/chat/completions",
+      "model": "llama-3.1-8b-instant"
     }
   }
 }

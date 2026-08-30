@@ -32,7 +32,11 @@
 
 ## 2. Где мы сейчас
 
-(этот коммит) Phase 6-N: Настройки 2.0 — дата аккаунта, экспорт zip, сила пароля, цветные статусы ключей, light/smart в настройках; fix .cs-menu absolute в настройках ← HEAD
+(этот коммит) Phase 6-M: Медиа — app/media.py (Groq Whisper, ffmpeg-кадры, attachments), файлы/изображения/аудио/видео в чате (до 5 ≤10МБ), активные слоты композера с превью, ключ Groq в реестре ← HEAD
+717fbb6 fix round 5: настройки видимы на новых/старых аккаунтах (.cs-menu absolute), серая полоса вкладок
+a1b26e0 Phase 6-N: Настройки 2.0
+32aa193 Phase 6-N2: glassmorphism-редизайн настроек
+96187ea fix round 4: аватар-оверлей, вкладки, редактор на всю высоту
 a160473 Phase 6-O4: 19 багфиксов/фич от автора
 b55d0b0 fix round 3: чат-кнопка = новая сессия, бета-кнопка, hatnote вики
 678e012 fix round 2: шаг 5, бета-бейдж, сессии в списке, вики-сайдбар, счётчик реплик
@@ -64,7 +68,7 @@ e4d33e9 fix: клики по бета-баннеру (pointer-events)
 | 6-W | вики 1:1 | полный шаблон Иванопедии, backlinks | modules.py, app.js | ✅ |
 | 6-O..O4 | онбординг 2.0 + «Ритуал запуска» | слайдер, живое ядро, ачивки, финал с конфетти, пара моделей | app.js, monica.css, server.py | ✅ |
 | **6-N** | **Настройки 2.0 — наполнение** (приоритет автора) | 1) дата создания аккаунта в Профиле; 2) «Экспорт данных» — zip (vault + профиль + история) через /api/profile/export; 3) индикатор силы пароля при смене; 4) цветовые статусы ключей (проверен/ошибка/не проверялся); 5) показ и правка пары light/smart моделей из онбординга; 6) fix: .cs-menu (absolute из style.css) в настройках → static | server.py (+export, +custom-models, +keys_status), app.js (setTab*), monica.css | ✅ |
-| **6-M** | **Медиа: фото/видео/файлы/голос** | app/media.py: Groq Whisper (голос), ffmpeg-кадры (видео→vision), save_attachment (до 5 файлов ≤10МБ в attachments/); /api/chat(+stream) принимают files[]; композер: активация слотов, превью вложений; новый ключ groq в KEY_SERVICES | app/media.py (новый), server.py, providers.py, app.js, onboarding.py | ☐ |
+| **6-M** | **Медиа: фото/видео/файлы/голос** | app/media.py: Groq Whisper (голос), ffmpeg-кадры (видео→vision), save_attachment (до 5 файлов ≤10МБ в attachments/); /api/chat(+stream) принимают files[]; композер: активация слотов, превью вложений; ключ groq в KEY_SERVICES | app/media.py (новый), server.py, providers.py, app.js, onboarding.py | ✅ |
 | 6-F | хвосты 5-I | кликабельность @sozrelyy (исправлено в e4d33e9 — проверить), отступы после topbar | app.js, monica.css | ☐ |
 | 7 | боевой режим | mock_llm=false + проверка реальных ключей на всех маршрутах; tools/import_vault.py (импорт .md Ивана); чистка тестовых аккаунтов | config.json, tools/ | ☐ |
 | 8 | деплой | HTTPS/reverse proxy, автозапуск, бэкапы data/ | — | ☐ |

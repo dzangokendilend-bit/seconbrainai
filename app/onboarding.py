@@ -27,11 +27,12 @@ DEFAULT_MODEL = "gpt-5.6-luna"
 SOURCES = ["друзья", "TikTok", "Instagram", "другое"]
 PURPOSES = ["личный дневник", "знания", "проекты", "другое"]
 LANGUAGES = ["ru", "ua", "en"]
-KEY_SERVICES = ["glm", "smart", "luna"]
+KEY_SERVICES = ["glm", "smart", "luna", "groq"]
 KEY_LABELS = {
     "glm": ["GLM 5.3 Fast", "терминал и быстрые операции"],
     "smart": ["OpenRouter", "глубокие модели для second-brain"],
     "luna": ["ChatGPT 5.6 Luna", "Telegram-бот и чат на сайте"],
+    "groq": ["Groq Whisper", "расшифровка голосовых и аудио (медиа в чате)"],
 }
 
 
