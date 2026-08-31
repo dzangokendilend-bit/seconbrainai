@@ -32,7 +32,11 @@ const consoleErrors = [], badResponses = [];
   await page.setViewport({width: 1440, height: 900});
   page.on("console", m => { if (m.type() === "error") consoleErrors.push(m.text()); });
   page.on("pageerror", e => consoleErrors.push("PAGEERROR: " + e.message));
-  page.on("response", r => { if (r.status() >= 400) badResponses.push(r.status() + " " + r.url()); });
+  page.on("response", r => {
+    /* 404 от /api/wiki/read — намеренная проверка состояния «статья не найдена» */
+    if (r.status() >= 400 && r.url().indexOf("/api/wiki/read") < 0)
+      badResponses.push(r.status() + " " + r.url());
+  });
 
   const checks = [];
   const ok = (name, cond) => { checks.push([name, !!cond]); console.log((cond ? "  \u2705 " : "  \u274c ") + name); };
@@ -207,6 +211,45 @@ const consoleErrors = [], badResponses = [];
     (await page.$("#cs-sess")) && (await page.$("#sess-new")));
   ok("6-S: проекты — панель и кнопка создания",
     (await page.$("#cs-proj")) && (await page.$("#proj-new")));
+  /* ── Реворк вики: дерево vault в сайдбаре (общая renderTree с Терминалом) ── */
+  await new Promise(r => setTimeout(r, 900));
+  const wkDirs = await page.$$eval("#wk-tree .tdir", els => els.length).catch(() => 0);
+  ok("вики-реворк: дерево папок в сайдбаре, не плоский список (папок " + wkDirs + ")", wkDirs >= 1);
+  ok("вики-реворк: счётчики .md у папок", await page.$("#wk-tree .tdir .tcount"));
+  const wkFiles = await page.$$eval("#wk-tree .tfile", els => els.length).catch(() => 0);
+  ok("вики-реворк: в дереве только .md (файлов " + wkFiles + ")", wkFiles >= 1);
+  /* поиск фильтрует дерево, сохраняя родительские папки */
+  await page.click("#wk-q");
+  await page.type("#wk-q", "animations");
+  await new Promise(r => setTimeout(r, 400));
+  const fDirs = await page.$$eval("#wk-tree .tdir", els => els.map(d => d.dataset.dir)).catch(() => []);
+  const fFiles = await page.$$eval("#wk-tree .tfile", els => els.map(b => b.dataset.p)).catch(() => []);
+  ok("вики-реворк: поиск фильтрует дерево с родителями (найдено " + fFiles.length + ")",
+    fFiles.length >= 1 && fFiles.every(p => p.toLowerCase().indexOf("animations") >= 0) &&
+    fFiles.every(p => fDirs.some(d => p.indexOf(d + "/") === 0)));
+  await page.evaluate(() => {
+    const i = document.getElementById("wk-q");
+    i.value = "";
+    i.dispatchEvent(new Event("input"));
+  });
+  await new Promise(r => setTimeout(r, 300));
+  /* состояние раскрытых папок переживает перезагрузку (localStorage) */
+  const hasDirs = await page.$("#wk-tree .tdir summary");
+  if (hasDirs) {
+    const dirPath = await page.$eval("#wk-tree .tdir", el => el.dataset.dir);
+    await page.click("#wk-tree .tdir summary");   // свернули первую папку
+    await new Promise(r => setTimeout(r, 300));
+    await page.reload({waitUntil: "networkidle0", timeout: 15000});
+    await page.waitForSelector("#scr-app:not(.hidden)", {timeout: 8000}).catch(() => {});
+    await page.click('.cs-navitem[data-tab="wiki"]');
+    await new Promise(r => setTimeout(r, 1000));
+    const stillOpen = await page.$eval("#wk-tree .tdir[data-dir='" + dirPath + "']",
+      el => el.open).catch(() => null);
+    ok("вики-реворк: свернутая папка осталась свернутой после перезагрузки (" +
+      dirPath + ")", stillOpen === false);
+  } else {
+    ok("вики-реворк: состояние папок после перезагрузки (нет папок — пропуск)", true);
+  }
   await tab("tg", "#tg-body", "статус бота");
   /* Фаза B: аналитика за re-auth gate — сначала форма, потом сводка */
   await tab("ana", "#ana-pass", "форма re-auth аналитики");
@@ -362,6 +405,132 @@ const consoleErrors = [], badResponses = [];
   const hmNoTok = await apiRaw("/api/analytics/heatmap");
   ok("Фаза B: heatmap без токена → 401 «требуется повторный вход»",
     hmNoTok.status === 401 && /повторный вход/.test(hmNoTok.data.error || ""));
+
+  /* ── Реворк вики: API реального чтения + безопасность пути ── */
+  const wtree = (await apiRaw("/api/vault/tree", {method: "POST", body: "{}"})).data.tree || [];
+  const wmd = wtree.filter(p => /\.md$/i.test(p));
+  ok("вики-реворк: в vault есть .md для теста чтения", wmd.length >= 1);
+  if (wmd.length) {
+    const wr = await apiRaw("/api/wiki/read", {method: "POST",
+      body: JSON.stringify({path: wmd[0]})});
+    const vr = await apiRaw("/api/vault/read", {method: "POST",
+      body: JSON.stringify({path: wmd[0]})});
+    ok("вики-реворк: /api/wiki/read отдаёт реальный контент (= /api/vault/read, " +
+      wmd[0] + ")",
+      wr.status === 200 && wr.data.ok && wr.data.content === vr.data.content &&
+      typeof wr.data.mtime === "number" && wr.data.path === wmd[0]);
+  }
+  const travG = await apiRaw("/api/wiki/read?path=../../config.json");
+  ok("вики-реворк: GET ?path=../../config.json → ошибка (traversal заблокирован)",
+    travG.status === 400 && !!travG.data.error);
+  const travP = await apiRaw("/api/wiki/read", {method: "POST",
+    body: JSON.stringify({path: "x/../../config.json"})});
+  ok("вики-реворк: POST traversal тоже заблокирован", travP.status === 400);
+  const nonMd = await apiRaw("/api/wiki/read", {method: "POST",
+    body: JSON.stringify({path: "config.json"})});
+  ok("вики-реворк: не-.md файл вики не читает", nonMd.status === 400);
+  const wNoAuth = await fetch(BASE + "/api/wiki/read?path=x.md").then(r => r.status);
+  ok("вики-реворк: без сессии /api/wiki/read → 401", wNoAuth === 401);
+
+  /* ── Реворк вики: UI — frontmatter, wikilinks, race-guard ── */
+  const wtag = String(Date.now() % 1000000);
+  const mkNote = (p, c) => apiRaw("/api/vault/write", {method: "POST",
+    body: JSON.stringify({path: p, content: c})});
+  await mkNote("wiki-test/Source " + wtag + ".md",
+    "---\ntitle: Source " + wtag + "\ntags: [smoke, wikitest]\ncreated: 2026-01-01\n" +
+    "status: draft\n---\n\n# Source " + wtag + "\n\nСм. [[Target " + wtag +
+    "|цель]] и [[Missing " + wtag + "]] и [[Dup " + wtag + "]].\n\n" +
+    "| A | B |\n|---|---|\n| 1 | 2 |\n");
+  await mkNote("wiki-test/Target " + wtag + ".md",
+    "---\ntitle: Target " + wtag + "\n---\n\nTARGET-CONTENT-" + wtag + "\n");
+  await mkNote("wiki-test/amb/Dup " + wtag + ".md", "# dup one\n");
+  await mkNote("wiki-test/amb2/Dup " + wtag + ".md", "# dup two\n");
+  await mkNote("wiki-test/Slow " + wtag + ".md", "SLOW-CONTENT-" + wtag + "\n");
+  await mkNote("wiki-test/Fast " + wtag + ".md", "FAST-CONTENT-" + wtag + "\n");
+  await page.click('.cs-navitem[data-tab="wiki"]');
+  await new Promise(r => setTimeout(r, 1200));
+  /* фильтр по уникальному тегу — только наши тестовые файлы;
+     клик по конкретному data-p (полный относительный путь) */
+  const openWkFile = needle => page.evaluate(n => {
+    const b = Array.from(document.querySelectorAll("#wk-tree .tfile"))
+      .find(x => x.dataset.p.indexOf(n) >= 0);
+    if (b) b.click();
+    return !!b;
+  }, needle);
+  await page.evaluate(t => {
+    const i = document.getElementById("wk-q");
+    i.value = t;
+    i.dispatchEvent(new Event("input"));
+  }, wtag);
+  await new Promise(r => setTimeout(r, 400));
+  ok("вики-реворк: тестовые файлы найдены в дереве по фильтру",
+    await openWkFile("Source " + wtag));
+  await page.waitForSelector("#wk-view .firstHeading", {timeout: 5000}).catch(() => {});
+  await new Promise(r => setTimeout(r, 500));
+  const artTitle = await page.$eval("#wk-view .firstHeading", el => el.textContent).catch(() => "");
+  ok("вики-реворк: статья открыта по полному пути («" + artTitle + "»)",
+    artTitle === "Source " + wtag);
+  const artBody = await page.$eval("#wk-view .body", el => el.textContent).catch(() => "");
+  ok("вики-реворк: frontmatter не показан как текст тела",
+    !/title:|status:|created:/.test(artBody));
+  ok("вики-реворк: теги и неизвестное поле (status) в инфобоксе .wk-ib",
+    await page.$eval("#wk-view .wk-ib",
+      el => el.textContent.includes("smoke") && el.textContent.includes("draft")).catch(() => false));
+  ok("вики-реворк: md-таблица отрендерена общим md()", await page.$("#wk-view .md-table"));
+  /* wikilink → существующая статья (резолв по уникальному basename) */
+  await page.click("#wk-view a.wl");
+  await new Promise(r => setTimeout(r, 700));
+  const tgtTxt = await page.$eval("#wk-view", el => el.textContent).catch(() => "");
+  ok("вики-реворк: клик по [[wikilink]] открыл целевую статью внутри вики",
+    tgtTxt.indexOf("TARGET-CONTENT-" + wtag) >= 0);
+  /* несуществующий wikilink → «Статья не найдена» + предложение создать */
+  await openWkFile("Source " + wtag);
+  await new Promise(r => setTimeout(r, 700));
+  await page.evaluate(() => {
+    const a = document.querySelectorAll("#wk-view a.wl")[1];
+    if (a) a.click();
+  });
+  await new Promise(r => setTimeout(r, 400));
+  ok("вики-реворк: несуществующий wikilink → «Статья не найдена» + кнопка «Создать»",
+    await page.$eval("#wk-view",
+      el => el.textContent.indexOf("Статья не найдена") >= 0 && !!el.querySelector("#wk-create")).catch(() => false));
+  /* неоднозначный wikilink → выбор из вариантов */
+  await openWkFile("Source " + wtag);
+  await new Promise(r => setTimeout(r, 700));
+  await page.evaluate(() => {
+    const a = document.querySelectorAll("#wk-view a.wl")[2];
+    if (a) a.click();
+  });
+  await new Promise(r => setTimeout(r, 400));
+  const ambN = await page.$$eval("#wk-view .wk-links a", els => els.length).catch(() => 0);
+  ok("вики-реворк: неоднозначный wikilink → выбор из вариантов (вариантов " + ambN + ")",
+    ambN === 2);
+  /* race-guard: медленный ответ первой статьи не перезаписывает быстрый второй */
+  await page.evaluate(() => {
+    const orig = window.fetch;
+    window.__origFetch = orig;
+    window.fetch = (url, opts) => {
+      const b = opts && opts.body ? String(opts.body) : "";
+      if (b.indexOf("Slow") >= 0)
+        return new Promise(res => setTimeout(() => res(orig(url, opts)), 900));
+      return orig(url, opts);
+    };
+  });
+  await page.evaluate(t => {
+    const i = document.getElementById("wk-q");
+    i.value = t;
+    i.dispatchEvent(new Event("input"));
+  }, wtag);
+  await new Promise(r => setTimeout(r, 400));
+  await openWkFile("Slow " + wtag);
+  await openWkFile("Fast " + wtag);
+  await new Promise(r => setTimeout(r, 1600));
+  const raceTxt = await page.$eval("#wk-view", el => el.textContent).catch(() => "");
+  ok("вики-реворк: race-guard — финальный контент от последней статьи (Fast)",
+    raceTxt.indexOf("FAST-CONTENT-" + wtag) >= 0 &&
+    raceTxt.indexOf("SLOW-CONTENT-" + wtag) < 0);
+  await page.evaluate(() => { window.fetch = window.__origFetch; });
+  await page.screenshot({path: path.join(__dirname, "ui_last.png")});
 
   ok("нет ошибок JS в консоли", consoleErrors.length === 0);
   ok("нет ответов 4xx/5xx", badResponses.length === 0);

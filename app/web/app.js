@@ -51,13 +51,37 @@ function md(src) {
     if (inUl) { out.push("</ul>"); inUl = false; }
     if (inOl) { out.push("</ol>"); inOl = false; }
   };
-  for (const ln of s.split("\n")) {
+  /* таблицы: подряд идущие строки, начинающиеся с | */
+  const drawTable = block => {
+    const rows = block.map(r =>
+      r.replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|").map(c => c.trim()));
+    let html = "<tr>" + rows[0].map(c => "<th>" + inl(c) + "</th>").join("") + "</tr>";
+    for (let j = 1; j < rows.length; j++) {
+      if (j === 1 && rows[j].every(c => /^:?-{2,}:?$/.test(c))) continue;
+      html += "<tr>" + rows[j].map(c => "<td>" + inl(c) + "</td>").join("") + "</tr>";
+    }
+    return '<table class="md-table">' + html + "</table>";
+  };
+  const lines = s.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i];
     let m;
-    if ((m = ln.match(/^###\s+(.*)/))) { closeL(); out.push("<h3>" + inl(m[1]) + "</h3>"); }
+    if (ln.startsWith("|")) {
+      const block = [];
+      while (i < lines.length && lines[i].startsWith("|")) block.push(lines[i++]);
+      i--;
+      closeL();
+      out.push(drawTable(block));
+    }
+    else if ((m = ln.match(/^###\s+(.*)/))) { closeL(); out.push("<h3>" + inl(m[1]) + "</h3>"); }
     else if ((m = ln.match(/^##\s+(.*)/))) { closeL(); out.push("<h2>" + inl(m[1]) + "</h2>"); }
     else if ((m = ln.match(/^#\s+(.*)/))) { closeL(); out.push("<h2>" + inl(m[1]) + "</h2>"); }
     else if ((m = ln.match(/^&gt;\s?(.*)/))) { closeL(); out.push("<blockquote>" + inl(m[1]) + "</blockquote>"); }
-    else if ((m = ln.match(/^[-*]\s+(.*)/))) {
+    else if ((m = ln.match(/^[-*]\s+\[( |x|X)\]\s+(.*)/))) {
+      /* чек-листы */
+      if (!inUl) { closeL(); out.push('<ul class="tasklist">'); inUl = true; }
+      out.push('<li class="task">' + (m[1] === " " ? "☐" : "☑") + " " + inl(m[2]) + "</li>");
+    } else if ((m = ln.match(/^[-*]\s+(.*)/))) {
       if (!inUl) { closeL(); out.push("<ul>"); inUl = true; }
       out.push("<li>" + inl(m[1]) + "</li>");
     } else if ((m = ln.match(/^\d+[.)]\s+(.*)/))) {
@@ -72,8 +96,13 @@ function md(src) {
 
 function inl(x) {
   return x.replace(/`([^`]+)`/g, (m, c) => "<code>" + c + "</code>")
+    .replace(/!\[([^\]]*)\]\((https?:[^)\s]+|data:image\/[^)\s]+)\)/g,
+      '<img src="$2" alt="$1" loading="lazy">')
     .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
     .replace(/\*([^*\n]+)\*/g, "<i>$1</i>")
+    .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
+      (m, tgt, alias) => '<a href="#" class="wl" data-wl="' +
+        tgt.trim().split('"').join("'") + '">' + (alias || tgt) + "</a>")
     .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g,
       '<a href="$2" target="_blank" rel="noopener">$1</a>');
 }
@@ -1616,36 +1645,103 @@ const FOLDER_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 const FILE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>';
 const PIN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5M9 3h6l1 7 3 3H5l3-3z"/></svg>';
 
-function renderTreeNode(node, out, prefix) {
+/* ── Реворк вики: ОДНО общее дерево vault для Терминала и Википедии ──
+   renderTree(box, paths, opts) — единственный рендерер дерева:
+     opts.selected   — полный относительный путь выбранного файла (выделение)
+     opts.onOpen(p)  — клик по файлу (полный относительный путь)
+     opts.showCounts — счётчик .md у папки (включая вложенные)
+     opts.filterMd   — показывать только .md (папки без .md скрываются)
+     opts.storageKey — localStorage-ключ состояния раскрытых папок
+     opts.query      — поисковый запрос: фильтр с сохранением родителей
+     opts.emptyText  — заглушка пустого vault */
+function pruneEmptyDirs(node) {
+  Object.keys(node.dirs).forEach(name => {
+    pruneEmptyDirs(node.dirs[name]);
+    const d = node.dirs[name];
+    if (!d.files.length && !Object.keys(d.dirs).length) delete node.dirs[name];
+  });
+}
+function treeMdCount(node) {
+  let n = node.files.length;
+  Object.keys(node.dirs).forEach(k => { n += treeMdCount(node.dirs[k]); });
+  return n;
+}
+function loadOpenDirs(key) {
+  try { return JSON.parse(localStorage.getItem(key) || "null"); } catch (e) { return null; }
+}
+function saveOpenDirs(key, set) {
+  try { localStorage.setItem(key, JSON.stringify(Array.from(set))); } catch (e) {}
+}
+function renderTreeNode(node, out, prefix, opts, openSet, forceOpen) {
   Object.keys(node.dirs).sort().forEach(name => {
     const dirPath = prefix ? prefix + "/" + name : name;
-    out.push('<details class="tdir" open data-dir="' + esc(dirPath) + '"><summary>' +
-      FOLDER_SVG + esc(name) + "</summary>");
-    renderTreeNode(node.dirs[name], out, dirPath);
+    const isOpen = forceOpen || openSet.has(dirPath);
+    const cnt = opts.showCounts
+      ? ' <span class="tcount">' + treeMdCount(node.dirs[name]) + "</span>" : "";
+    out.push('<details class="tdir" data-dir="' + esc(dirPath) + '"' +
+      (isOpen ? " open" : "") + "><summary>" + FOLDER_SVG + esc(name) + cnt + "</summary>");
+    renderTreeNode(node.dirs[name], out, dirPath, opts, openSet, forceOpen);
     out.push("</details>");
   });
   node.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(f => {
-    out.push('<button type="button" class="tfile' + (f.path === TERM.openFile ? " sel" : "") +
+    out.push('<button type="button" class="tfile' + (f.path === opts.selected ? " sel" : "") +
       '" data-p="' + esc(f.path) + '">' + FILE_SVG + esc(f.name) + "</button>");
   });
 }
+function renderTree(box, paths, opts) {
+  opts = opts || {};
+  let list = paths || [];
+  if (opts.filterMd) list = list.filter(p => /\.md$/i.test(p));
+  const q = (opts.query || "").trim().toLowerCase();
+  if (q) list = list.filter(p => p.toLowerCase().indexOf(q) >= 0);
+  const tree = buildTree(list);
+  if (opts.filterMd) pruneEmptyDirs(tree);
+  const saved = loadOpenDirs(opts.storageKey);
+  /* без сохранённого состояния — всё раскрыто (прежнее поведение Терминала);
+     при активном поиске папки принудительно раскрыты, состояние не пишем */
+  const forceOpen = !!q || !saved;
+  const openSet = new Set(saved || []);
+  const out = [];
+  renderTreeNode(tree, out, "", opts, openSet, forceOpen);
+  box.innerHTML = out.length ? out.join("") :
+    (opts.emptyText || '<div class="sub">пусто</div>');
+  /* первый toggle сохраняет ПОЛНОЕ текущее состояние (по умолчанию всё
+     раскрыто), а не только одну папку — иначе после первого сворачивания
+     схлопнулось бы всё дерево */
+  const dirEls = Array.from(box.querySelectorAll(".tdir"));
+  const initialOpen = dirEls.filter(d => d.open).map(d => d.dataset.dir);
+  dirEls.forEach(d => d.addEventListener("toggle", () => {
+    const s = new Set(loadOpenDirs(opts.storageKey) || initialOpen);
+    if (d.open) s.add(d.dataset.dir); else s.delete(d.dataset.dir);
+    saveOpenDirs(opts.storageKey, s);
+  }));
+  box.querySelectorAll(".tfile").forEach(b => b.onclick = () => {
+    box.querySelectorAll(".tfile").forEach(x => x.classList.toggle("sel", x === b));
+    if (opts.onOpen) opts.onOpen(b.dataset.p);
+  });
+}
 
+/* Терминал: то же дерево, что и в вики — общая renderTree (regression-safe) */
 async function drawTree() {
   const box = $("ttree");
   if (!box) return;
   const r = await api("/api/vault/tree", {});
-  const out = [];
-  renderTreeNode(buildTree(r.data.tree || []), out, "");
-  box.innerHTML = out.length ? out.join("") : '<div class="sub">vault пуст</div>';
-  box.querySelectorAll(".tfile").forEach(b => b.onclick = () => {
-    TERM.openFile = b.dataset.p;
-    box.querySelectorAll(".tfile").forEach(x => x.classList.toggle("sel", x === b));
-    $("tv-chat").classList.remove("on");
-    $("tv-edit").classList.add("on");
-    $("tchat").classList.add("hidden");
-    $("teditor").classList.remove("hidden");
-    TERM.view = "edit";
-    loadEditor();
+  TERM.paths = r.data.tree || [];
+  renderTree(box, TERM.paths, {
+    selected: TERM.openFile,
+    onOpen: p => {
+      TERM.openFile = p;
+      $("tv-chat").classList.remove("on");
+      $("tv-edit").classList.add("on");
+      $("tchat").classList.add("hidden");
+      $("teditor").classList.remove("hidden");
+      TERM.view = "edit";
+      loadEditor();
+    },
+    showCounts: false,
+    filterMd: false,
+    storageKey: "monica-term-tree",
+    emptyText: '<div class="sub">vault пуст</div>'
   });
 }
 
@@ -1779,14 +1875,24 @@ async function termTurn(text) {
 }
 
 /* ── Википедия: личная вики в стиле Иванопедии (Фаза 5-F + Полировка-1) ── */
+/* Реворк вики: frontmatter --- … --- (или *** … ***) отделяется от тела.
+   meta — известные и неизвестные поля, raw — исходный блок целиком
+   (неизвестные поля не теряются при последующем сохранении),
+   error — повреждённый YAML: статья всё равно открывается, с предупреждением. */
 function parseFrontmatter(text) {
-  const meta = {};
-  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
-  if (m) m[1].split(/\r?\n/).forEach(line => {
-    const kv = line.match(/^(\w+):\s*(.*)$/);
-    if (kv) meta[kv[1]] = kv[2].replace(/^\[/, "").replace(/\]$/, "").trim();
+  const res = {meta: {}, body: text || "", raw: "", error: ""};
+  const m = (text || "").match(/^(---|\*\*\*)\r?\n([\s\S]*?)\r?\n\1(?:\r?\n|$)/);
+  if (!m) return res;
+  res.raw = m[0];
+  res.body = text.slice(m[0].length);
+  m[2].split(/\r?\n/).forEach(line => {
+    if (!line.trim() || /^\s*#/.test(line)) return;
+    const kv = line.match(/^([\w-]+):\s*(.*)$/);
+    if (kv) res.meta[kv[1]] = kv[2].replace(/^\[/, "").replace(/\]$/, "").trim();
+    else if (!/^\s*-\s/.test(line))  /* yaml-списки пропускаем без ошибки */
+      res.error = "строка «" + line.trim() + "» не распознана";
   });
-  return {meta: meta, body: text.slice(m ? m[0].length : 0)};
+  return res;
 }
 
 function tabWiki(p) {
@@ -1816,7 +1922,9 @@ function tabWiki(p) {
     '<li><a href="#" id="wk-nav-home">Заглавная страница</a></li>' +
     '<li><a href="#" id="wk-nav-random">Случайная статья</a></li>' +
     '<li><a href="#" id="wk-nav-all">Все статьи</a></li></ul></div>' +
-    '<div class="sgroup"><h3>Статьи</h3><ul id="wk-arts-ul"></ul></div>' +
+    /* Реворк вики: вместо плоского списка статей — дерево vault
+       (общая renderTree с Терминалом), папки раскрываются, счётчики .md */
+    '<div class="sgroup"><h3>Заметки vault</h3><div id="wk-tree" class="wk-tree"></div></div>' +
     '<div class="sgroup"><h3>Инструменты</h3><ul>' +
     '<li><a href="#" id="wk-nav-search">Поиск по заметкам</a></li>' +
     '<li><a href="#" id="wk-nav-links">Ссылки сюда</a></li>' +
@@ -1833,63 +1941,170 @@ function tabWiki(p) {
     "</main>" +
     "</div>" +
     '<div id="wk-res" class="body" style="margin-top:12px"></div></div>';
-  const drawArts = async () => {
-    const r = await api("/api/wiki/articles", {});
-    const arts = r.data.articles || [];
-    $("wk-regen").textContent = "Обновить вики" +
-      (r.data.queued ? " (" + r.data.queued + " в очереди)" : "");
-    /* 5-I фикс: обновляем только список статей, не затирая Навигацию/Инструменты */
-    const ul = $("wk-arts-ul");
-    if (!ul) return;
-    ul.innerHTML = arts.length ? arts.map(a =>
-      '<li><a href="#" data-p="' + esc(a.path) + '">' + esc(a.title) +
-      (a.topic ? ' <span class="wk-badge">тема</span>' : "") + "</a></li>").join("")
-      : '<li><span class="sub">Статей пока нет — «Обновить вики» создаст их из очереди.</span></li>';
-    ul.querySelectorAll("a[data-p]").forEach(el =>
-      el.onclick = ev => { ev.preventDefault(); openArticle(el.dataset.p); });
-  };
+  /* Реворк вики: сайдбар — дерево vault (общая renderTree с Терминалом),
+     выбор файла по ПОЛНОМУ относительному пути; плоского списка статей
+     (/api/wiki/articles) в production-flow больше нет. */
+  let WK_REQ = 0;      // race-guard: рендерит только последний ответ
   let WK_CUR = null;
-  const openArticle = async path => {
-    const r = await api("/api/wiki/articles", {path: path});
-    if (r.data.error) { $("wk-view").innerHTML = '<p style="color:var(--red)">' + esc(r.data.error) + "</p>"; return; }
-    const fm = parseFrontmatter(r.data.content);
-    const title = fm.meta.title || (path.split("/").pop() || "").replace(/\.md$/, "");
-    WK_CUR = {path: path, title: title};
-    const bl = await api("/api/wiki/backlinks", {title: title});
-    const links = bl.data.backlinks || [];
-    /* 6-W: шаблон статьи Иванопедии. Фикс автора: ОДИН заголовок H1
-       (без caption в инфобоксе и без дубля из тела), инфобокс — компактная
-       карточка СПРАВА от текста, без строки «статья личной вики Моники» */
-    let body = fm.body;
-    const dupRe = new RegExp("^\\s*#\\s+" +
-      title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\n+");
-    body = body.replace(dupRe, "");
-    $("wk-view").innerHTML =
-      (fm.meta.source ? '<div class="hatnote amber" style="margin:0 0 14px">Источник заметки: <b>' +
-        esc(fm.meta.source) + "</b></div>" : "") +
-      '<h1 class="firstHeading">' + esc(title) + "</h1>" +
-      '<table class="infobox wk-ib">' +
-      "<tr><th>создано</th><td>" + esc(fm.meta.created || "—") + "</td></tr>" +
-      "<tr><th>источник</th><td>" + esc(fm.meta.source || "—") + "</td></tr>" +
-      "<tr><th>теги</th><td>" + esc(fm.meta.tags || "—") + "</td></tr>" +
-      "</table>" +
-      '<div class="body">' + md(body) +
-      (links.length ? '<h2 style="font-family:var(--serif);font-size:20px;margin:1.2em 0 .4em">Ссылки сюда</h2>' +
-        '<ul class="wk-links">' + links.map(l =>
-          '<li><a href="#" data-p="wiki/' + esc(l) + '.md">' + esc(l) + "</a></li>").join("") + "</ul>" : "") +
-      (fm.meta.tags ? '<div class="wk-cats">Категории: ' + fm.meta.tags.split(/[,;]\s*/)
-        .filter(Boolean).map(t => '<span class="tagc">' + esc(t) + "</span>").join(" ") + "</div>" : "") +
-      "</div>";
-    $("wk-home").classList.add("hidden");
-    $("wk-view").classList.remove("hidden");
-    animTab($("wk-view"));
-    $("wk-back").onclick = () => {
-      $("wk-view").classList.add("hidden");
-      $("wk-home").classList.remove("hidden");
+  let WK_PATHS = [];   // все .md vault (полные относительные пути)
+  const baseName = p => (p.split("/").pop() || "").replace(/\.md$/i, "");
+  const wkErr = msg => '<p style="color:var(--red)">' + esc(msg) + "</p>";
+
+  const applyWikiFilter = () => {
+    const box = $("wk-tree");
+    if (!box) return;
+    renderTree(box, WK_PATHS, {
+      selected: WK_CUR ? WK_CUR.path : null,
+      onOpen: openArticle,
+      showCounts: true,
+      filterMd: true,
+      storageKey: "monica-wiki-tree",
+      query: $("wk-q").value,
+      emptyText: ($("wk-q").value || "").trim()
+        ? '<div class="sub">По этому фильтру заметок нет.</div>'
+        : '<div class="sub">vault пуст — заметок нет.</div>'
+    });
+  };
+  const drawWikiTree = async () => {
+    const box = $("wk-tree");
+    if (!box) return;
+    box.innerHTML = '<div class="sub">загрузка дерева…</div>';
+    const r = await api("/api/vault/tree", {});
+    if (!box.isConnected) return;
+    if (r.data.error) { box.innerHTML = '<div class="sub">⚠️ ' + esc(r.data.error) + "</div>"; return; }
+    WK_PATHS = r.data.tree || [];
+    applyWikiFilter();
+    /* счётчик очереди — только индикатор на кнопке, контент он не задаёт */
+    api("/api/wiki/articles", {}).then(q => {
+      const b = $("wk-regen");
+      if (b && !b.disabled && q.data.queued !== undefined)
+        b.textContent = "Обновить вики" + (q.data.queued ? " (" + q.data.queued + " в очереди)" : "");
+    });
+  };
+
+  const notFoundHtml = name =>
+    '<h1 class="firstHeading">Статья не найдена</h1>' +
+    '<div class="body"><p>Заметки «' + esc(name) + "» нет в vault.</p>" +
+    '<button type="button" class="cs-act primary" id="wk-create">Создать «' +
+    esc(name) + "»</button></div>";
+  const bindCreate = name => {
+    const c = $("wk-create");
+    if (c) c.onclick = async () => {
+      const path = "wiki/" + name + ".md";
+      const r = await api("/api/vault/write", {path: path,
+        content: "---\ntitle: " + name + "\ncreated: " +
+          new Date().toISOString().slice(0, 10) + "\n---\n\n# " + name + "\n\n"});
+      if (r.data.error) { $("wk-view").innerHTML = wkErr(r.data.error); return; }
+      drawWikiTree();
+      openArticle(r.data.path || path);
     };
-    $("wk-view").querySelectorAll(".wk-links a").forEach(a =>
+  };
+
+  /* резолв [[wikilink]] по дереву vault: полный путь → уникальный basename */
+  const resolveWikiLink = target => {
+    const t = (target || "").trim().replace(/\.md$/i, "");
+    if (!t) return {type: "none", name: target};
+    const norm = p => p.replace(/\.md$/i, "").toLowerCase();
+    const exact = WK_PATHS.filter(p => norm(p) === t.toLowerCase());
+    if (exact.length) return {type: "ok", path: exact[0]};
+    const base = t.split("/").pop().toLowerCase();
+    const byBase = WK_PATHS.filter(p => norm(p).split("/").pop() === base);
+    if (byBase.length === 1) return {type: "ok", path: byBase[0]};
+    if (byBase.length > 1) return {type: "amb", options: byBase, name: t};
+    return {type: "none", name: base || t};
+  };
+  const showAmbiguous = (name, options) => {
+    $("wk-view").innerHTML =
+      '<h1 class="firstHeading">Неоднозначная ссылка</h1>' +
+      '<div class="body"><p>«' + esc(name) + "» — несколько заметок с таким именем:</p>" +
+      '<ul class="wk-links">' + options.map(p =>
+        '<li><a href="#" data-p="' + esc(p) + '">' + esc(p) + "</a></li>").join("") + "</ul></div>";
+    $("wk-view").querySelectorAll("a[data-p]").forEach(a =>
       a.onclick = ev => { ev.preventDefault(); openArticle(a.dataset.p); });
   };
+
+  const openArticle = async path => {
+    const view = $("wk-view"), home = $("wk-home");
+    const rid = ++WK_REQ;   // race-guard при быстром переключении статей
+    home.classList.add("hidden");
+    view.classList.remove("hidden");
+    view.innerHTML = '<p class="sub">загрузка статьи…</p>';
+    let r;
+    try {
+      r = await api("/api/wiki/read", {path: path});
+    } catch (e) {
+      if (rid === WK_REQ) view.innerHTML = wkErr("ошибка чтения: " + e);
+      return;
+    }
+    if (rid !== WK_REQ) return;   // устаревший медленный ответ не перезаписывает
+    if (r.status === 401 || r.status === 403) {
+      view.innerHTML = wkErr("нет доступа: " + (r.data.error || "нужен вход")); return;
+    }
+    if (r.status === 404) {
+      view.innerHTML = notFoundHtml(baseName(r.data.path || path));
+      bindCreate(baseName(r.data.path || path));
+      return;
+    }
+    if (r.data.error) { view.innerHTML = wkErr(r.data.error); return; }
+    const fm = parseFrontmatter(r.data.content);
+    const title = fm.meta.title || baseName(r.data.path || path);
+    WK_CUR = {path: r.data.path || path, title: title};
+    let html;
+    try {
+      const bl = await api("/api/wiki/backlinks", {title: title});
+      const links = rid === WK_REQ ? (bl.data.backlinks || []) : [];
+      /* 6-W: шаблон статьи Иванопедии — ОДИН заголовок H1, инфобокс справа */
+      let body = fm.body;
+      const dupRe = new RegExp("^\\s*#\\s+" +
+        title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\n+");
+      body = body.replace(dupRe, "");
+      const ibRows = [["создано", fm.meta.created], ["источник", fm.meta.source], ["теги", fm.meta.tags]];
+      Object.keys(fm.meta).forEach(k => {
+        if (["title", "created", "source", "tags"].indexOf(k) < 0) ibRows.push([k, fm.meta[k]]);
+      });
+      html =
+        '<button type="button" class="cs-act" id="wk-back" style="margin-bottom:10px">← заглавная</button>' +
+        (fm.error ? '<div class="hatnote amber" style="margin:0 0 14px">⚠️ Повреждённый frontmatter: ' +
+          esc(fm.error) + " — статья открыта, но метаданные могут быть неполными.</div>" : "") +
+        (fm.meta.source ? '<div class="hatnote" style="margin:0 0 14px">Источник заметки: <b>' +
+          esc(fm.meta.source) + "</b></div>" : "") +
+        '<h1 class="firstHeading">' + esc(title) + "</h1>" +
+        '<table class="infobox wk-ib">' +
+        ibRows.filter(rw => rw[1]).map(rw =>
+          "<tr><th>" + esc(rw[0]) + "</th><td>" + esc(rw[1]) + "</td></tr>").join("") +
+        "</table>" +
+        '<div class="body">' + md(body) +
+        (links.length ? '<h2 style="font-family:var(--serif);font-size:20px;margin:1.2em 0 .4em">Ссылки сюда</h2>' +
+          '<ul class="wk-links">' + links.map(l =>
+            '<li><a href="#" data-wl="' + esc(l) + '">' + esc(l) + "</a></li>").join("") + "</ul>" : "") +
+        (fm.meta.tags ? '<div class="wk-cats">Категории: ' + fm.meta.tags.split(/[,;]\s*/)
+          .filter(Boolean).map(t => '<span class="tagc">' + esc(t) + "</span>").join(" ") + "</div>" : "") +
+        "</div>";
+    } catch (e) {
+      html = wkErr("ошибка рендеринга: " + e);
+    }
+    if (rid !== WK_REQ) return;
+    view.innerHTML = html;
+    animTab(view);
+    const bb = $("wk-back");
+    if (bb) bb.onclick = () => {
+      view.classList.add("hidden");
+      home.classList.remove("hidden");
+    };
+  };
+  /* клик по [[wikilink]] — навигация внутри вкладки Википедия, без перезагрузки */
+  $("wk-view").addEventListener("click", ev => {
+    const a = ev.target.closest("a[data-wl]");
+    if (!a) return;
+    ev.preventDefault();
+    const res = resolveWikiLink(a.dataset.wl);
+    if (res.type === "ok") openArticle(res.path);
+    else if (res.type === "amb") showAmbiguous(res.name, res.options);
+    else {
+      $("wk-view").innerHTML = notFoundHtml(res.name);
+      bindCreate(res.name);
+    }
+  });
   const showBacklinks = async () => {
     if (!WK_CUR) { $("wk-res").innerHTML = '<p class="sub">Открой статью — тогда покажу, кто на неё ссылается.</p>'; return; }
     const bl = await api("/api/wiki/backlinks", {title: WK_CUR.title});
@@ -1903,7 +2118,7 @@ function tabWiki(p) {
       '<div class="wk-meta">статьи, упоминающие «' + esc(WK_CUR.title) + "»</div>" +
       '<div class="body">' + (links.length ?
         '<ul class="wk-links">' + links.map(l =>
-          '<li><a href="#" data-p="wiki/' + esc(l) + '.md">' + esc(l) + "</a></li>").join("") + "</ul>" :
+          '<li><a href="#" data-wl="' + esc(l) + '">' + esc(l) + "</a></li>").join("") + "</ul>" :
         "<p>Пока ни одна статья не ссылается на эту.</p>") + "</div>";
     $("wk-back").onclick = () => {
       $("wk-view").classList.add("hidden");
@@ -1917,11 +2132,8 @@ function tabWiki(p) {
     openTab("term");
   };
   const randomArticle = () => {
-    api("/api/wiki/articles", {}).then(r => {
-      const arts = r.data.articles || [];
-      if (!arts.length) { $("wk-res").innerHTML = '<p class="sub">Статей пока нет.</p>'; return; }
-      openArticle(arts[Math.floor(Math.random() * arts.length)].path);
-    });
+    if (!WK_PATHS.length) { $("wk-res").innerHTML = '<p class="sub">Заметок пока нет.</p>'; return; }
+    openArticle(WK_PATHS[Math.floor(Math.random() * WK_PATHS.length)]);
   };
   $("wk-regen").onclick = async () => {
     $("wk-regen").disabled = true;
@@ -1929,7 +2141,7 @@ function tabWiki(p) {
     const r = await api("/api/wiki/regen", {});
     $("wk-regen").disabled = false;
     if (r.data.error) { $("wk-regen").textContent = "Обновить вики"; return; }
-    drawArts();
+    drawWikiTree();
   };
   /* фикс автора: сводные страницы знаний «Тема: X» */
   $("wk-topics").onclick = async () => {
@@ -1950,27 +2162,11 @@ function tabWiki(p) {
       : "<p>Тем пока не нашлось — добавь заметкам теги или [[ссылки]].</p>";
     $("wk-res").querySelectorAll("a[data-p]").forEach(a =>
       a.onclick = ev => { ev.preventDefault(); openArticle(a.dataset.p); });
-    drawArts();
+    drawWikiTree();
   };
-  const doSearch = async () => {
-    const r = await api("/api/wiki/search", {query: $("wk-q").value});
-    const res = r.data.results || [];
-    if (!res.length) { $("wk-res").innerHTML = "<p>По этому запросу заметок нет.</p>"; return; }
-    $("wk-res").innerHTML = res.map(h =>
-      '<div class="wl"><div class="wl-t">' + esc(h.path) + "</div>" +
-      '<div class="wl-s">' + esc(h.snippet) + "</div>" +
-      '<button class="cs-act" data-p="' + esc(h.path) + '">сделать выжимку</button></div>').join("");
-    $("wk-res").querySelectorAll(".cs-act").forEach(b => b.onclick = () => {
-      const title = prompt("Название выжимки:");
-      if (!title) return;
-      api("/api/wiki/extract", {source_path: b.dataset.p, title: title}).then(r2 => {
-        $("wk-res").insertAdjacentHTML("afterbegin",
-          r2.data.ok ? "<p>✅ Выжимка сохранена: <b>" + esc(r2.data.path) + "</b></p>" :
-          '<p style="color:var(--red)">' + esc(r2.data.error) + "</p>");
-      });
-    });
-  };
-  $("wk-q").onkeydown = e => { if (e.key === "Enter") doSearch(); };
+  /* Реворк вики: поиск в topbar фильтрует ДЕРЕВО заметок (с родительскими
+     папками найденных файлов), а не уходит в отдельный полнотекстовый поиск */
+  $("wk-q").addEventListener("input", applyWikiFilter);
   /* 6-W: навигация и инструменты Иванопедии */
   $("wk-nav-home").onclick = ev => {
     ev.preventDefault();
@@ -1978,15 +2174,16 @@ function tabWiki(p) {
     $("wk-home").classList.remove("hidden");
   };
   $("wk-nav-random").onclick = ev => { ev.preventDefault(); randomArticle(); };
+  $("wk-nav-search").onclick = ev => { ev.preventDefault(); $("wk-q").focus(); };
   $("wk-nav-all").onclick = ev => {
     ev.preventDefault();
     $("wk-view").classList.add("hidden");
     $("wk-home").classList.remove("hidden");
-    $("wk-res").innerHTML = '<p class="sub">Все статьи — в списке слева.</p>';
+    $("wk-res").innerHTML = '<p class="sub">Все заметки — в дереве слева.</p>';
   };
   $("wk-nav-links").onclick = ev => { ev.preventDefault(); showBacklinks(); };
   $("wk-nav-edit").onclick = ev => { ev.preventDefault(); editArticle(); };
-  drawArts();
+  drawWikiTree();
 }
 
 /* ── Telegram-бот: подключение токена и статус поллера ── */

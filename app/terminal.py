@@ -37,14 +37,17 @@ SYSTEM = """Ты — ИИ терминала веб-сервиса Моника.
 - {"op": "list", "path": "папка"}
 Если просьба запрещённая — reply с отказом и объяснением, ops: [].
 """
-def vault_tree(vault):
+def vault_tree(vault, limit=200):
+    """limit=200 — для промпта терминала (LLM не нужен весь vault);
+    маршрут /api/vault/tree передаёт больший лимит: и Терминал, и Википедия
+    показывают РЕАЛЬНУЮ структуру vault целиком (реворк вики)."""
     out = []
     for root, dirs, files in os.walk(vault):
         dirs[:] = [d for d in dirs if not d.startswith(".")]
         for f in files:
             rel = os.path.relpath(os.path.join(root, f), vault).replace(os.sep, "/")
             out.append(rel)
-            if len(out) >= 200:
+            if len(out) >= limit:
                 return out
     return out
 

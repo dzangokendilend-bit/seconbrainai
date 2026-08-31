@@ -199,6 +199,41 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError:
                     pass
 
+    # ── служебное: чтение .md для вики (общий safe_path с Терминалом) ──
+
+    def _wiki_read(self, body=None):
+        """Реворк вики: реальное содержимое файла по полному относительному
+        пути. Тонкая обёртка над term.safe_path (тот же vault, та же защита
+        от ../ и абсолютных путей), только .md, доступ по сессии.
+        body — уже разобранный JSON из do_POST (повторно прочитать rfile
+        нельзя: поток исчерпан и запрос повиснет)."""
+        uid = self._uid()
+        if not uid:
+            self._json({"error": "нужен вход"}, 401)
+            return
+        vault = os.path.join(auth.user_dir(uid), "vault")
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        rel_raw = (q.get("path") or [""])[0] or ((body or {}).get("path") or "")
+        try:
+            full, rel = term.safe_path(vault, rel_raw)
+        except ValueError as e:
+            self._json({"error": str(e)}, 400)
+            return
+        if not rel.lower().endswith(".md"):
+            self._json({"error": "вики читает только .md файлы"}, 400)
+            return
+        if not os.path.exists(full) or os.path.isdir(full):
+            self._json({"error": "файл не найден"}, 404)
+            return
+        try:
+            with open(full, encoding="utf-8", errors="replace") as f:
+                content = f.read(200_000)
+            mtime = int(os.path.getmtime(full))
+        except OSError as e:
+            self._json({"error": "ошибка чтения: " + str(e)}, 500)
+            return
+        self._json({"ok": True, "path": rel, "content": content, "mtime": mtime})
+
     # ── GET ──
 
     def do_GET(self):
@@ -297,6 +332,11 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "отчёт не найден"}, 404)
                     return
                 self._json({"ok": True, "report": rep})
+            return
+        if path == "/api/wiki/read":
+            # реворк вики: реальный файл по полному относительному пути
+            # (GET ?path=…; тот же маршрут доступен и через POST)
+            self._wiki_read()
             return
         if path in ("/", "/index.html"):
             self._serve_file("index.html", "text/html; charset=utf-8")
@@ -812,7 +852,9 @@ class Handler(BaseHTTPRequestHandler):
         # ── Фаза 5-E: Терминал 2.0 — дерево/чтение/запись/история/undo ──
         if path == "/api/vault/tree":
             vault = os.path.join(auth.user_dir(uid), "vault")
-            self._json({"tree": term.vault_tree(vault)})
+            # реворк вики: дерево отдаётся ЦЕЛИКОМ (без лимита промпта 200),
+            # иначе вики не видит часть vault; промпт терминала по-прежнему 200
+            self._json({"tree": term.vault_tree(vault, limit=100000)})
             return
 
         if path == "/api/vault/read":
@@ -869,6 +911,12 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # ── Фаза 5-F: личная вики ──
+        if path == "/api/wiki/read":
+            # реворк вики: реальное содержимое .md (POST-вариант того же
+            # маршрута, что и GET ?path=) — общий term.safe_path
+            self._wiki_read(body)
+            return
+
         if path == "/api/wiki/articles":
             vault = os.path.join(auth.user_dir(uid), "vault")
             if body.get("path"):

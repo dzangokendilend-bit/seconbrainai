@@ -519,6 +519,22 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 .tdir .tfile{padding-left:22px}
 .tfile svg{width:14px;height:14px;flex:none;opacity:.55}
 .tfile{display:flex;align-items:center;gap:7px}
+/* Реворк вики: общее дерево — счётчик .md у папки */
+.tcount{margin-left:auto;flex:none;font-size:10px;color:var(--muted);
+  background:rgba(255,255,255,.06);border-radius:9px;padding:1px 7px}
+/* Реворк вики: дерево vault в сайдбаре Википедии */
+.wk-tree{overflow-y:auto;max-height:52vh;padding-right:2px}
+/* Реворк вики: markdown-таблицы и чек-листы в общем md() */
+.md-table{border-collapse:collapse;margin:.8em 0;width:100%;font-size:13px}
+.md-table th,.md-table td{border:1px solid rgba(255,255,255,.12);
+  padding:6px 10px;text-align:left}
+.md-table th{background:rgba(143,180,255,.08)}
+ul.tasklist{list-style:none;padding-left:6px}
+ul.tasklist li.task::before{content:none}
+/* Реворк вики: [[wikilinks]] внутри статьи */
+.wk-view a.wl,.wk-view .wk-links a{color:var(--acc);text-decoration:none;
+  border-bottom:1px solid rgba(143,180,255,.35);cursor:pointer}
+.wk-view a.wl:hover,.wk-view .wk-links a:hover{border-bottom-color:var(--acc)}
 
 /* ── 5-H.1: переход между модулями, Вариант A — fade-доминанта ──
    Смещение 10px, 0.22s ease-out, применяется только к #m-body (контент),
