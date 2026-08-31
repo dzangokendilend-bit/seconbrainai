@@ -76,12 +76,29 @@ def parse_model_reply(raw):
 
 
 def safe_path(vault, rel):
-    rel = str(rel or "").strip().replace(os.sep, "/").lstrip("/")
-    if not rel or ".." in rel.split("/"):
-        raise ValueError("недопустимый путь: " + str(rel))
-    full = os.path.realpath(os.path.join(vault, *rel.split("/")))
+    r"""security-аудит: каноническая проверка пути.
+    - null bytes запрещены сразу (иначе ValueError уже в open() -> 500);
+    - backslash -> "/" ДО разбора (..\..\, смешанные разделители ..\/);
+    - все all-dot компоненты (".", "..", "...", "....") отвергаются:
+      ".." — traversal, а "...." Win32 молча нормализует (trailing dots
+      strip) и откроет ДРУГОЙ файл внутри vault (path confusion);
+    - абсолютные пути и drive-буквы (C:, C:\\, \\server) запрещены явно
+      (lstrip("/") превращает /etc/passwd и \\server\share в относительные);
+    - realpath разрешает symlinks, сравнение с vault root через normcase
+      (Windows case-insensitive) + startswith с os.sep."""
+    raw = str(rel or "")
+    if chr(0) in raw:
+        raise ValueError("недопустимый путь: null byte")
+    rel = raw.strip().replace("\\", "/").replace(os.sep, "/").lstrip("/")
+    parts = [p for p in rel.split("/") if p != ""]
+    if not parts or any(set(p) <= {"."} for p in parts):
+        raise ValueError("недопустимый путь: " + raw)
+    if os.path.isabs(rel) or (len(rel) >= 2 and rel[1] == ":"):
+        raise ValueError("абсолютные пути запрещены: " + rel)
+    full = os.path.realpath(os.path.join(vault, *parts))
     vroot = os.path.realpath(vault)
-    if full != vroot and not full.startswith(vroot + os.sep):
+    fn, fv = os.path.normcase(full), os.path.normcase(vroot)
+    if fn != fv and not fn.startswith(fv + os.sep):
         raise ValueError("выход за пределы vault: " + rel)
     return full, rel
 

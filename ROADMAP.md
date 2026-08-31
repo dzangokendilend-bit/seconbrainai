@@ -64,7 +64,9 @@ e4d33e9 fix: клики по бета-баннеру (pointer-events)
 со стримингом и медиа-вложениями, Терминал 2.1, вики 1:1, проекты сессий,
 настройки ×3 (glassmorphism), роли моделей в чате, Фаза A (бюджеты, аудит,
 rate limits, состояния ключей), Фаза B (импорт vault 2.0, heatmap, re-auth gate),
-ui_smoke 113/113.
+security-аудит: md()/inl() escape-first с экранированием кавычек (attribute-injection
+XSS в img/a/wikilink-алиасах закрыт), safe_path канонический (realpath+normcase,
+null bytes, backslash, all-dot компоненты, абсолютные пути), ui_smoke 121/121.
 `mock_llm: true` — модели пока заглушки (переключает автор при наличии ключей).
 
 ## 3. Дорожная карта

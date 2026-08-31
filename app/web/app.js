@@ -2,7 +2,12 @@
 /* Моника 1.0 — фронт. Каркас и стили перенесены из chat.html / login.html /
    index.html Сибериады почти 1:1; привязки переписаны на API Моники. */
 const $ = id => document.getElementById(id);
-const esc = s => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+/* security-аудит: экранируем и кавычки — esc() попадает не только в
+   текстовые узлы, но и в HTML-атрибуты (alt/src/href в inl(),
+   data-wl/data-p в вики); без &quot; кавычка из заметки ломала
+   атрибут и давала attribute-injection XSS (<img onerror=...>). */
+const esc = s => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
 async function api(path, body, method, headers) {
   const m = method || "POST";

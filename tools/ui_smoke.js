@@ -432,6 +432,21 @@ const consoleErrors = [], badResponses = [];
   const wNoAuth = await fetch(BASE + "/api/wiki/read?path=x.md").then(r => r.status);
   ok("вики-реворк: без сессии /api/wiki/read → 401", wNoAuth === 401);
 
+  /* ── Security: traversal-регрессии safe_path (encode/backslash/null/abs) ── */
+  const secEnc = await apiRaw("/api/wiki/read?path=..%2f..%2fconfig.json");
+  ok("security: /api/wiki/read ?path=..%2f..%2fconfig.json (URL-encoded) → 400",
+    secEnc.status === 400);
+  const secBs = await apiRaw("/api/vault/read", {method: "POST",
+    body: JSON.stringify({path: "..\\..\\config.json"})});
+  ok("security: /api/vault/read ..\\..\\config.json (backslash) → 400",
+    secBs.status === 400);
+  const secNull = await apiRaw("/api/vault/read", {method: "POST",
+    body: JSON.stringify({path: "note\x00.md"})});
+  ok("security: /api/vault/read с null byte → 400", secNull.status === 400);
+  const secAbs = await apiRaw("/api/vault/read", {method: "POST",
+    body: JSON.stringify({path: "C:\\Windows\\win.ini"})});
+  ok("security: /api/vault/read абсолютный путь C:\ → 400", secAbs.status === 400);
+
   /* ── Реворк вики: UI — frontmatter, wikilinks, race-guard ── */
   const wtag = String(Date.now() % 1000000);
   const mkNote = (p, c) => apiRaw("/api/vault/write", {method: "POST",
@@ -447,6 +462,16 @@ const consoleErrors = [], badResponses = [];
   await mkNote("wiki-test/amb2/Dup " + wtag + ".md", "# dup two\n");
   await mkNote("wiki-test/Slow " + wtag + ".md", "SLOW-CONTENT-" + wtag + "\n");
   await mkNote("wiki-test/Fast " + wtag + ".md", "FAST-CONTENT-" + wtag + "\n");
+  /* security: зловредная заметка для XSS-регрессии md() */
+  const xtag = "XSS" + (Date.now() % 1000000);
+  await mkNote("wiki-test/" + xtag + ".md",
+    "---\ntitle: " + xtag + " <img src=x onerror=alert(91)>\ntags: [xss]\n" +
+    "created: 2026-01-01\n---\n\n" +
+    "<script>alert('x1')</script>\n\n" +
+    '![a" onerror="alert(92)](' + BASE + '/health)\n\n' +
+    "[c](javascript:alert(93))\n\n" +
+    '[[x|"><img onerror=alert(94)>]]\n\n' +
+    "<svg onload=alert(95)></svg><iframe src=javascript:alert(96)></iframe>\n");
   await page.click('.cs-navitem[data-tab="wiki"]');
   await new Promise(r => setTimeout(r, 1200));
   /* фильтр по уникальному тегу — только наши тестовые файлы;
@@ -530,6 +555,36 @@ const consoleErrors = [], badResponses = [];
     raceTxt.indexOf("FAST-CONTENT-" + wtag) >= 0 &&
     raceTxt.indexOf("SLOW-CONTENT-" + wtag) < 0);
   await page.evaluate(() => { window.fetch = window.__origFetch; });
+
+  /* ── Security: XSS-регрессия md() — зловредная заметка не исполняет код ── */
+  await page.evaluate(() => {
+    window.__xssAlerts = 0;
+    window.alert = () => { window.__xssAlerts++; };
+  });
+  await page.evaluate(t => {
+    const i = document.getElementById("wk-q");
+    i.value = t;
+    i.dispatchEvent(new Event("input"));
+  }, xtag);
+  await new Promise(r => setTimeout(r, 400));
+  await openWkFile(xtag);
+  await page.waitForSelector("#wk-view .firstHeading", {timeout: 5000}).catch(() => {});
+  await new Promise(r => setTimeout(r, 500));
+  const xs = await page.evaluate(() => ({
+    bad: document.querySelectorAll(
+      "#wk-view script, #wk-view iframe, #wk-view object, #wk-view embed").length,
+    onattrs: Array.from(document.querySelectorAll("#wk-view *"))
+      .filter(el => Array.from(el.attributes || [])
+        .some(a => /^on/i.test(a.name))).length,
+    alerts: window.__xssAlerts,
+    txt: (document.querySelector("#wk-view") || {}).textContent || ""
+  }));
+  ok("security: XSS-заметка — нет script/iframe/object/embed в DOM", xs.bad === 0);
+  ok("security: XSS-заметка — нет on*-атрибутов в DOM", xs.onattrs === 0);
+  ok("security: XSS-заметка — window.alert не вызван", xs.alerts === 0);
+  ok("security: XSS-заметка — HTML видимо экранирован",
+    xs.txt.indexOf("<script>") >= 0 && xs.txt.indexOf("<svg") >= 0 &&
+    xs.txt.indexOf("javascript:alert(93)") >= 0);
   await page.screenshot({path: path.join(__dirname, "ui_last.png")});
 
   ok("нет ошибок JS в консоли", consoleErrors.length === 0);

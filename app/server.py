@@ -1005,7 +1005,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "укажи название выжимки"}, 400)
                 return
             vault = os.path.join(auth.user_dir(uid), "vault")
-            src, rel = term.safe_path(vault, body.get("source_path"))
+            try:
+                src, rel = term.safe_path(vault, body.get("source_path"))
+            except ValueError as e:
+                self._json({"error": str(e)}, 400)
+                return
             with open(src, encoding="utf-8", errors="replace") as f:
                 src_text = f.read()
             ex_dir = os.path.join(vault, "Выжимки")
