@@ -2059,7 +2059,7 @@ async function tabAna(p) {
     s.by_day.map(d => '<div class="bar-row"><span class="d">' + d[0] + '</span>' +
       '<span class="bar-track"><span class="bar-fill" style="width:' + (d[1] / max * 100) + '%"></span></span><b>' + d[1] + '</b></div>').join("") +
     '<div class="set-card" style="margin-top:22px"><div class="set-h">Импорт vault из ZIP (Obsidian)</div>' +
-    '<p class="sub" style="padding:0 16px 10px">Заархивируй папку vault в ZIP — заметки .md и вложения сохранят структуру папок, содержимое не меняется. Папка .obsidian игнорируется. Для импорта папки без ZIP: <code>python tools/import_vault.py</code></p>' +
+    '<p class="sub" style="padding:0 16px 10px">Заархивируй папку vault в ZIP — заметки .md и вложения сохранят структуру папок, содержимое не меняется. Папка .obsidian игнорируется. Лимиты: архив ≤ 2 ГБ, файл ≤ 100 МБ, ≤ 20 000 файлов. Для импорта папки без ZIP: <code>python tools/import_vault.py</code></p>' +
     '<input type="file" id="imp-file" accept=".zip">' +
     '<div id="imp-prev"></div></div>' +
     '<div class="warn" style="margin-top:18px">Аналитика видит только твой vault. Использование для слежки за людьми запрещено — я откажусь и объясню.</div>';
@@ -2072,19 +2072,18 @@ async function tabAna(p) {
   $("imp-file").onchange = async () => {
     const f = $("imp-file").files[0];
     if (!f) return;
-    if (f.size > 17 * 1024 * 1024) {
-      $("imp-prev").innerHTML = '<div class="err">ZIP больше 17МБ — для больших vault используй tools/import_vault.py (папка напрямую)</div>';
+    if (f.size > 2 * 1024 * 1024 * 1024) {
+      $("imp-prev").innerHTML = '<div class="err">ZIP больше 2 ГБ — лимит загрузки</div>';
       return;
     }
     $("imp-prev").innerHTML = '<p class="sum">анализирую архив…</p>';
-    const b64 = await new Promise(res => {
-      const rd = new FileReader();
-      rd.onload = () => res(rd.result.split(",", 2)[1]);
-      rd.readAsDataURL(f);
-    });
-    const pr = await api("/api/import/preview", {zip: b64});
-    if (pr.data.error) { $("imp-prev").innerHTML = '<div class="err">' + esc(pr.data.error) + '</div>'; return; }
-    const pv = pr.data.preview;
+    /* Фаза B+: raw binary — файл уходит как есть (браузер стримит сам),
+       без FileReader/base64: 2ГБ не раздуваются в RAM клиента и сервера */
+    const pr = await fetch("/api/import/preview", {method: "POST",
+      headers: {"Content-Type": "application/zip"}, body: f});
+    const pd = await pr.json().catch(() => ({}));
+    if (pd.error) { $("imp-prev").innerHTML = '<div class="err">' + esc(pd.error) + '</div>'; return; }
+    const pv = pd.preview;
     $("imp-prev").innerHTML =
       '<div class="sum">заметок: <b>' + pv.notes + '</b> · вложений: <b>' + pv.attachments +
       '</b> · размер: <b>' + (pv.total_size / 1024).toFixed(0) + ' КБ</b>' +
@@ -2099,9 +2098,12 @@ async function tabAna(p) {
       '<div class="mbar" id="imp-bar" style="display:none"><i></i></div><div class="sum" id="imp-stat"></div>';
     $("imp-go").onclick = async () => {
       $("imp-go").disabled = true;
-      const rr = await api("/api/import/run", {zip: b64, strategy: $("imp-strat").value});
-      if (rr.data.error) { $("imp-stat").textContent = rr.data.error; return; }
-      pollImport(rr.data.job_id);
+      const rr = await fetch("/api/import/run?strategy=" +
+        encodeURIComponent($("imp-strat").value), {method: "POST",
+        headers: {"Content-Type": "application/zip"}, body: f});
+      const rd = await rr.json().catch(() => ({}));
+      if (rd.error) { $("imp-stat").textContent = rd.error; return; }
+      pollImport(rd.job_id);
     };
   };
 }

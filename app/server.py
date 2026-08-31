@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 import urllib.parse
 import zipfile
@@ -70,10 +71,18 @@ CHAT_SYSTEM = ("Ты — Моника, личный ИИ-ассистент по
                "Если нужен ключ или модуль не включён — подскажи зайти в настройки. "
                "Работаешь только с данными этого пользователя.")
 MAX_BODY = 24 * 1024 * 1024  # 6-M: медиа-вложения (5 файлов ≤10МБ → base64)
+# Фаза B+: лимит стриминговой загрузки ZIP-архива для импорта (2 ГБ).
+# К маршрутам /api/import/preview|run MAX_BODY не применяется — тело
+# читается потоком напрямую в temp-файл (см. _handle_import).
+MAX_UPLOAD = 2 * 1024 * 1024 * 1024
+IMPORT_UPLOAD_PATHS = ("/api/import/preview", "/api/import/run")
 
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "Monica/1.0"
+    # Стриминговая загрузка 2ГБ (импорт vault) не должна обрываться по
+    # сокет-таймауту: None = блокирующее чтение без лимита времени.
+    timeout = None
 
     def log_message(self, fmt, *args):
         pass
@@ -107,6 +116,88 @@ class Handler(BaseHTTPRequestHandler):
     def _uid(self):
         c = cookies.SimpleCookie(self.headers.get("Cookie", ""))
         return auth.session_uid(c[COOKIE].value) if COOKIE in c else None
+
+    def _stream_zip_temp(self):
+        """Фаза B+: raw binary ZIP (Content-Type: application/zip) → temp-файл.
+        Читаем self.rfile чанками по 1МБ — 2ГБ не попадают в RAM. Лимит
+        MAX_UPLOAD проверяется и до чтения (по Content-Length), и на лету.
+        Ошибка/превышение → temp удаляется, ответ уже отправлен, → None."""
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+        except ValueError:
+            length = 0
+        if length <= 0:
+            self._json({"error": "ожидается raw binary ZIP "
+                                 "(Content-Type: application/zip)"}, 400)
+            return None
+        if length > MAX_UPLOAD:
+            self._json({"error": "архив больше 2ГБ — лимит загрузки"}, 413)
+            return None
+        os.makedirs(os.path.join("data", "tmp"), exist_ok=True)
+        fd, tmp = tempfile.mkstemp(suffix=".zip", dir=os.path.join("data", "tmp"))
+        written = 0
+        try:
+            with os.fdopen(fd, "wb") as f:
+                while written < length:
+                    chunk = self.rfile.read(min(1024 * 1024, length - written))
+                    if not chunk:
+                        raise IOError("клиент оборвал передачу")
+                    f.write(chunk)
+                    written += len(chunk)
+                    if written > MAX_UPLOAD:
+                        self._json({"error": "архив больше 2ГБ — лимит загрузки"},
+                                   413)
+                        return None
+        except Exception:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return None
+        return tmp
+
+    def _handle_import(self, path):
+        """Фаза B+: /api/import/preview и /api/import/run. Raw binary ZIP
+        стримится во временный файл (MAX_BODY не применяется); JSON
+        {zip: base64} всё ещё принимается для совместимости (smoke).
+        Temp-файл удаляется после обработки (run() валидирует архив
+        синхронно до запуска фонового потока)."""
+        uid = self._uid()
+        if not uid:
+            self._json({"error": "нужен вход"}, 401)
+            return
+        ctype = (self.headers.get("Content-Type") or "").lower()
+        tmp = None
+        try:
+            if "application/json" in ctype:
+                body = self._body()
+                if body is None:
+                    self._json({"error": "пустой или слишком большой запрос"}, 400)
+                    return
+                zip_src = importer.decode_zip(body.get("zip"))
+                strategy = body.get("strategy") or "skip"
+            else:
+                tmp = self._stream_zip_temp()
+                if tmp is None:
+                    return
+                zip_src = tmp
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                strategy = (q.get("strategy") or ["skip"])[0]
+            try:
+                if path == "/api/import/preview":
+                    prev = importer.scan(uid, zip_src)
+                    self._json({"ok": True, "preview": prev})
+                else:
+                    job_id = importer.run(uid, zip_src, strategy)
+                    self._json({"ok": True, "job_id": job_id})
+            except importer.ImportError as e:
+                self._json({"error": str(e)}, 400)
+        finally:
+            if tmp:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
 
     # ── GET ──
 
@@ -251,6 +342,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
+        if path in IMPORT_UPLOAD_PATHS:
+            # Фаза B+: стриминговая загрузка ZIP мимо MAX_BODY (2 ГБ в temp)
+            self._handle_import(path)
+            return
         body = self._body()
         if body is None:
             self._json({"error": "пустой или слишком большой запрос"}, 400)
@@ -515,27 +610,6 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json({"ok": True, "token": analytics.issue_token(uid),
                         "ttl": analytics.TTL})
-            return
-
-        if path == "/api/import/preview":
-            # Фаза B: preview ZIP-архива без записи (риски 7-8 учтены в importer)
-            try:
-                prev = importer.scan(uid, importer.decode_zip(body.get("zip")))
-            except importer.ImportError as e:
-                self._json({"error": str(e)}, 400)
-                return
-            self._json({"ok": True, "preview": prev})
-            return
-
-        if path == "/api/import/run":
-            # Фаза B: фоновый импорт → {job_id}; прогресс — /api/import/status
-            try:
-                job_id = importer.run(uid, importer.decode_zip(body.get("zip")),
-                                      body.get("strategy") or "skip")
-            except importer.ImportError as e:
-                self._json({"error": str(e)}, 400)
-                return
-            self._json({"ok": True, "job_id": job_id})
             return
 
         if path == "/api/chat":

@@ -2,8 +2,8 @@
 # Безопасность (threat model, риски 7 и 8):
 #  - path traversal: каждый relpath нормализуется (запрет "..", абсолютных
 #    путей, дисков) и перепроверяется через terminal.safe_path;
-#  - ZIP-bomb: лимиты считаются ДО записи — суммарно ≤200МБ, ≤5000 файлов,
-#    один файл ≤20МБ; чтение записи идёт с потолком (размер из заголовка
+#  - ZIP-bomb: лимиты считаются ДО записи — суммарно ≤2ГБ, ≤20000 файлов,
+#    один файл ≤100МБ; чтение записи идёт с потолком (размер из заголовка
 #    может врать).
 # Контент заметок сохраняется байт-в-байт: frontmatter/теги/[[wikilinks]]
 # не парсим и не меняем (разбор — задача Фазы C). .obsidian/ игнорируется.
@@ -25,9 +25,9 @@ import auth
 import modules as mon_mods
 import terminal as term
 
-MAX_TOTAL = 200 * 1024 * 1024   # суммарный распакованный размер
-MAX_FILES = 5000                # количество файлов
-MAX_FILE = 20 * 1024 * 1024     # один файл
+MAX_TOTAL = 2 * 1024 * 1024 * 1024    # суммарный распакованный размер (2 ГБ)
+MAX_FILES = 20000                     # количество файлов
+MAX_FILE = 100 * 1024 * 1024          # один файл (100 МБ)
 NOTE_EXT = (".md", ".txt", ".markdown")
 STRATEGIES = ("overwrite", "skip", "copy")
 
@@ -64,11 +64,17 @@ def _norm_rel(name):
     return rel
 
 
-def _entries(zip_bytes):
+def _entries(zip_src):
     """Безопасное чтение архива в память: [(rel, bytes)], warnings.
-    Битый ZIP / превышение лимитов → ImportError (до каких-либо записей)."""
+    zip_src — байты архива ИЛИ путь к ZIP-файлу (стриминговая загрузка
+    сервера пишет тело запроса во временный файл, чтобы 2ГБ не читались
+    в RAM целиком). Битый ZIP / превышение лимитов → ImportError
+    (до каких-либо записей)."""
     try:
-        zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+        if isinstance(zip_src, str):
+            zf = zipfile.ZipFile(zip_src)  # путь к temp-файлу
+        else:
+            zf = zipfile.ZipFile(io.BytesIO(zip_src))
     except Exception:
         raise ImportError("битый или не-ZIP архив")
     out, total, warnings = [], 0, []
@@ -89,10 +95,10 @@ def _entries(zip_bytes):
             warnings.append("зашифрованный файл пропущен: " + rel[:80])
             continue
         if info.file_size > MAX_FILE:
-            warnings.append("файл больше 20МБ пропущен: " + rel[:80])
+            warnings.append("файл больше 100МБ пропущен: " + rel[:80])
             continue
         if total + info.file_size > MAX_TOTAL:
-            raise ImportError("архив распаковывается больше 200МБ — лимит ZIP-bomb")
+            raise ImportError("архив распаковывается больше 2ГБ — лимит ZIP-bomb")
         try:
             with zf.open(info) as f:
                 data = f.read(MAX_FILE + 1)  # потолок: заголовок мог соврать
@@ -100,7 +106,7 @@ def _entries(zip_bytes):
             warnings.append("не читается: " + rel[:80])
             continue
         if len(data) > MAX_FILE:
-            warnings.append("файл больше 20МБ пропущен: " + rel[:80])
+            warnings.append("файл больше 100МБ пропущен: " + rel[:80])
             continue
         total += len(data)
         out.append((rel, data))
@@ -125,11 +131,12 @@ def _save_json(path, obj):
     os.replace(tmp, path)
 
 
-def scan(uid, zip_bytes):
+def scan(uid, zip_src):
     """Preview без записи: сколько заметок/вложений, размер, конфликты
-    (файлы, уже существующие в vault), предупреждения."""
+    (файлы, уже существующие в vault), предупреждения.
+    zip_src — байты архива или путь к ZIP-файлу."""
     vault = os.path.join(auth.user_dir(uid), "vault")
-    entries, warnings = _entries(zip_bytes)
+    entries, warnings = _entries(zip_src)
     conflicts = []
     for rel, _ in entries:
         if os.path.exists(os.path.join(vault, *rel.split("/"))):
@@ -160,11 +167,12 @@ def _write(dest, data):
         f.write(data)
 
 
-def run(uid, zip_bytes, strategy="skip", job_id=None):
-    """Валидирует архив и запускает импорт в фоне. Возвращает job_id."""
+def run(uid, zip_src, strategy="skip", job_id=None):
+    """Валидирует архив и запускает импорт в фоне. Возвращает job_id.
+    zip_src — байты архива или путь к ZIP-файлу."""
     if strategy not in STRATEGIES:
         raise ImportError("стратегия должна быть одной из: " + ", ".join(STRATEGIES))
-    entries, warnings = _entries(zip_bytes)  # вся валидация — до потока
+    entries, warnings = _entries(zip_src)  # вся валидация — до потока
     job_id = job_id or ("imp_" + secrets.token_hex(6))
     with _LOCK:
         IMPORT_JOBS[job_id] = {"id": job_id, "status": "running", "progress": 0,
