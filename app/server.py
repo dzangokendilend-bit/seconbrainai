@@ -901,6 +901,15 @@ class Handler(BaseHTTPRequestHandler):
             notes = [body["note"]] if body.get("note") else mon_mods.queued(udir)[:2]
             done, errs = [], []
             for rel in notes:
+                # фикс автора: сырые логи/inbox/черновики не генерируем в вики
+                try:
+                    full, _ = term.safe_path(vault, rel)
+                    with open(full, encoding="utf-8", errors="replace") as f:
+                        if not mon_mods.is_encyclopedic(rel, f.read()):
+                            mon_mods.dequeue(udir, rel)
+                            continue
+                except Exception:
+                    pass
                 try:
                     art = mon_mods.generate_article(vault, rel, user_keys["smart"])
                     mon_mods.dequeue(udir, rel)
@@ -908,6 +917,25 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as e:
                     errs.append(str(rel) + ": " + str(e))
             self._json({"ok": True, "generated": done, "errors": errs})
+            return
+
+        if path == "/api/wiki/topics":
+            # фикс автора: сводные страницы знаний «Тема: X».
+            # Требует auth; в mock-режиме (или без ключа smart) — структурная
+            # заглушка без LLM.
+            p = auth.load_profile(uid)
+            if not p.get("modules", {}).get("wikipedia"):
+                self._json({"error": "модуль Википедия выключен"}, 403)
+                return
+            vault = os.path.join(auth.user_dir(uid), "vault")
+            user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
+            try:
+                made = mon_mods.topics(vault, user_keys.get("smart"))
+            except Exception as e:
+                self._json({"error": "не удалось собрать темы: " + str(e)}, 500)
+                return
+            audit.log(uid, "wiki_topics", count=len(made))
+            self._json({"ok": True, "topics": made})
             return
 
         if path == "/api/wiki/search":

@@ -1807,7 +1807,8 @@ function tabWiki(p) {
     '<g class="g-type"><text x="32" y="40" text-anchor="middle">М</text></g></svg>' +
     '<span class="brand-t"><b>Личная вики</b><small>твоя энциклопедия</small></span></a>' +
     '<div class="searchbox"><input id="wk-q" type="search" placeholder="Поиск по заметкам" autocomplete="off"></div>' +
-    '<div class="topcta"><button type="button" class="btn-black" id="wk-regen" title="Сгенерировать статьи из очереди">⟳ Обновить</button></div>' +
+    '<div class="topcta"><button type="button" class="btn-black" id="wk-topics" title="Собрать сводные статьи по темам vault">🧩 Собрать темы</button>' +
+    '<button type="button" class="btn-black" id="wk-regen" title="Сгенерировать статьи из очереди">⟳ Обновить</button></div>' +
     "</header>" +
     '<div class="wk-shell">' +
     '<nav class="side wk-side" id="wk-arts">' +
@@ -1841,7 +1842,8 @@ function tabWiki(p) {
     const ul = $("wk-arts-ul");
     if (!ul) return;
     ul.innerHTML = arts.length ? arts.map(a =>
-      '<li><a href="#" data-p="' + esc(a.path) + '">' + esc(a.title) + "</a></li>").join("")
+      '<li><a href="#" data-p="' + esc(a.path) + '">' + esc(a.title) +
+      (a.topic ? ' <span class="wk-badge">тема</span>' : "") + "</a></li>").join("")
       : '<li><span class="sub">Статей пока нет — «Обновить вики» создаст их из очереди.</span></li>';
     ul.querySelectorAll("a[data-p]").forEach(el =>
       el.onclick = ev => { ev.preventDefault(); openArticle(el.dataset.p); });
@@ -1855,19 +1857,23 @@ function tabWiki(p) {
     WK_CUR = {path: path, title: title};
     const bl = await api("/api/wiki/backlinks", {title: title});
     const links = bl.data.backlinks || [];
-    /* 6-W: полный шаблон статьи Иванопедии — hatnote, инфобокс с портретом,
-       «Ссылки сюда», категории */
+    /* 6-W: шаблон статьи Иванопедии. Фикс автора: ОДИН заголовок H1
+       (без caption в инфобоксе и без дубля из тела), инфобокс — компактная
+       карточка СПРАВА от текста, без строки «статья личной вики Моники» */
+    let body = fm.body;
+    const dupRe = new RegExp("^\\s*#\\s+" +
+      title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\n+");
+    body = body.replace(dupRe, "");
     $("wk-view").innerHTML =
       (fm.meta.source ? '<div class="hatnote amber" style="margin:0 0 14px">Источник заметки: <b>' +
         esc(fm.meta.source) + "</b></div>" : "") +
       '<h1 class="firstHeading">' + esc(title) + "</h1>" +
-      '<table class="infobox wk-ib"><caption>' + esc(title) + "</caption>" +
-      '<tr><td colspan="2" class="ib-portrait">📄</td></tr>' +
+      '<table class="infobox wk-ib">' +
       "<tr><th>создано</th><td>" + esc(fm.meta.created || "—") + "</td></tr>" +
       "<tr><th>источник</th><td>" + esc(fm.meta.source || "—") + "</td></tr>" +
       "<tr><th>теги</th><td>" + esc(fm.meta.tags || "—") + "</td></tr>" +
-      '<tr><td colspan="2" class="ib-foot">статья личной вики Моники</td></tr></table>' +
-      '<div class="body">' + md(fm.body) +
+      "</table>" +
+      '<div class="body">' + md(body) +
       (links.length ? '<h2 style="font-family:var(--serif);font-size:20px;margin:1.2em 0 .4em">Ссылки сюда</h2>' +
         '<ul class="wk-links">' + links.map(l =>
           '<li><a href="#" data-p="wiki/' + esc(l) + '.md">' + esc(l) + "</a></li>").join("") + "</ul>" : "") +
@@ -1923,6 +1929,27 @@ function tabWiki(p) {
     const r = await api("/api/wiki/regen", {});
     $("wk-regen").disabled = false;
     if (r.data.error) { $("wk-regen").textContent = "Обновить вики"; return; }
+    drawArts();
+  };
+  /* фикс автора: сводные страницы знаний «Тема: X» */
+  $("wk-topics").onclick = async () => {
+    const b = $("wk-topics");
+    b.disabled = true;
+    b.textContent = "собираю…";
+    const r = await api("/api/wiki/topics", {});
+    b.disabled = false;
+    b.textContent = "🧩 Собрать темы";
+    if (r.data.error) {
+      $("wk-res").innerHTML = '<p style="color:var(--red)">' + esc(r.data.error) + "</p>";
+      return;
+    }
+    const made = r.data.topics || [];
+    $("wk-res").innerHTML = made.length
+      ? "<p>✅ Сводных статей собрано: <b>" + made.length + "</b> — " +
+        made.map(t => '<a href="#" data-p="' + esc(t.path) + '">' + esc(t.title) + "</a>").join(", ") + "</p>"
+      : "<p>Тем пока не нашлось — добавь заметкам теги или [[ссылки]].</p>";
+    $("wk-res").querySelectorAll("a[data-p]").forEach(a =>
+      a.onclick = ev => { ev.preventDefault(); openArticle(a.dataset.p); });
     drawArts();
   };
   const doSearch = async () => {
