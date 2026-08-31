@@ -240,7 +240,7 @@ const consoleErrors = [], badResponses = [];
   await page.click("#mdl-btn");
   await new Promise(r => setTimeout(r, 300));
   const menuItems = await page.$$eval("#mdl-menu button", els => els.length).catch(() => 0);
-  ok("чат: меню моделей открылось, пунктов (факт " + menuItems + ")", menuItems >= 3);
+  ok("чат: меню ролей открылось, пунктов (факт " + menuItems + ")", menuItems === 2);
   await page.screenshot({path: path.join(__dirname, "ui_last.png")});
 
   ok("нет ошибок JS в консоли", consoleErrors.length === 0);

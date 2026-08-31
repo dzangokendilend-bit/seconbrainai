@@ -28,6 +28,21 @@ COOKIE = "monica_session"
 MODEL_SERVICE = {m["id"]: m["service"] for m in onboarding.MODELS}
 
 
+def resolve_model(uid, kind="light"):
+    """6-M2: chat_kind из prefs решает, какая пара работает в чате.
+    kind: light (повседневный чат) | smart (терминал/хранилище/pro)."""
+    p = auth.load_profile(uid)
+    prefs = (p.get("onboarding", {}).get("prefs") or {})
+    if kind == "light" and prefs.get("chat_kind") == "smart":
+        kind = "smart"
+    cust = prefs.get(kind) or {}
+    if isinstance(cust, dict) and str(cust.get("api_model") or "").strip():
+        svc = cust.get("provider") if cust.get("provider") in onboarding.KEY_SERVICES else "smart"
+        return svc, str(cust["api_model"]).strip()
+    model = onboarding.normalize_model(prefs.get("model"))
+    return (onboarding.service_for(model) or "luna", onboarding.api_model(model) or model)
+
+
 def build_user_content(uid, text, files):
     """6-M: маршрутизация медиа-вложений. Возвращает (content, media_notes).
     content — строка или массив частей (vision) для сообщения user."""
@@ -46,17 +61,6 @@ def build_user_content(uid, text, files):
     return content, "\n".join(notes)
 
 
-def resolve_model(uid, kind="light"):
-    """6-O4: кастомная пара провайдер+api_model из онбординга; иначе реестр.
-    kind: light (повседневный чат) | smart (терминал/хранилище/pro)."""
-    p = auth.load_profile(uid)
-    prefs = (p.get("onboarding", {}).get("prefs") or {})
-    cust = prefs.get(kind) or {}
-    if isinstance(cust, dict) and str(cust.get("api_model") or "").strip():
-        svc = cust.get("provider") if cust.get("provider") in onboarding.KEY_SERVICES else "smart"
-        return svc, str(cust["api_model"]).strip()
-    model = onboarding.normalize_model(prefs.get("model"))
-    return (onboarding.service_for(model) or "luna", onboarding.api_model(model) or model)
 CHAT_SYSTEM = ("Ты — Моника, личный ИИ-ассистент пользователя внутри веб-сервиса Моника. "
                "Дружелюбно, просто, без воды. Помогаешь с заметками, модулями и вопросами. "
                "Если нужен ключ или модуль не включён — подскажи зайти в настройки. "
@@ -327,6 +331,19 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": err}, 400)
                 return
             self._json({"ok": True, "username": p["username"]})
+            return
+
+        if path == "/api/prefs/kind":
+            # 6-M2: какая пара работает в чате — лёгкая или сложная
+            kind = body.get("kind")
+            if kind not in ("light", "smart"):
+                self._json({"error": "kind: light|smart"}, 400)
+                return
+            p = auth.load_profile(uid)
+            prefs = p.setdefault("onboarding", {}).setdefault("prefs", {})
+            prefs["chat_kind"] = kind
+            auth.save_profile(uid, p)
+            self._json({"ok": True, "kind": kind})
             return
 
         if path == "/api/prefs/custom-models":

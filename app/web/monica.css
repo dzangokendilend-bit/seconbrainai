@@ -590,9 +590,8 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 #s-body .set-card::before{content:"";position:absolute;
   inset:0 0 auto;height:1px;background:linear-gradient(90deg,transparent,
   rgba(255,255,255,.18),transparent);pointer-events:none}
-/* вкладки настроек: без серой полосы, кнопки непрозрачные */
-.set-tabs{position:sticky;top:0;z-index:5;background:transparent;
-  padding:10px 0;margin-bottom:12px}
+/* вкладки настроек: скроллятся вместе с контентом, без наложений */
+.set-tabs{background:transparent;padding:6px 0 10px;margin-bottom:12px}
 .set-tab{background:#101014}
 .set-tab:hover{background:#16161c}
 .set-tab.on{background:rgba(143,180,255,.12)}

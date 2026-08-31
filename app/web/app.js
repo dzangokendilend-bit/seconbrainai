@@ -1130,28 +1130,31 @@ function tabChat(p) {
     "</div></form>" +
     '<div class="cs-actions"><span id="cs-status" class="cs-status"></span></div></div>';
   const form = $("chat-form"), input = $("chat-input"), log = $("chat-log");
-  /* Фаза 5-B: быстрый переключатель модели вместо статичного чипа */
-  const cur = ((p.onboarding.prefs || {}).model) || "";
+  /* 6-M2: переключатель «Лёгкая/Сложная» — выбор роли, не конкретной модели */
   $("cs-status").innerHTML =
     '<span class="cs-modelwrap"><button type="button" class="cs-modelbtn" id="mdl-btn">' +
     '<span class="dot"></span><span id="mdl-name">…</span> <span class="chev">▾</span></button>' +
     '<div class="cs-modelmenu" id="mdl-menu"></div></span>';
-  ensureCFGM().then(c => {
-    const sel = c.models.some(m => m.id === cur) ? cur : c.default_model;
-    $("mdl-name").textContent = modelName(sel);
-    $("mdl-menu").innerHTML = c.models.map(m =>
-      '<button type="button" data-id="' + m.id + '"' + (m.id === sel ? ' class="sel"' : "") + ">" +
-      esc(m.name) + '<span class="d">' + esc((m.desc ? m.desc + " · " : "") + m.role) + "</span></button>").join("");
-    $("mdl-menu").querySelectorAll("button").forEach(b => b.onclick = async () => {
-      const r = await api("/api/prefs/model", {model: b.dataset.id});
-      if (!r.data.ok) return;
-      $("mdl-menu").classList.remove("open");
-      $("mdl-btn").classList.remove("open");
-      $("mdl-name").textContent = modelName(r.data.model);
-      $("mdl-menu").querySelectorAll("button").forEach(x =>
-        x.classList.toggle("sel", x.dataset.id === r.data.model));
-      if (ME.onboarding && ME.onboarding.prefs) ME.onboarding.prefs.model = r.data.model;
-    });
+  const prefs = (p.onboarding.prefs || {});
+  const lightName = (prefs.light || {}).api_model || "лёгкая";
+  const smartName = (prefs.smart || {}).api_model || "сложная";
+  const curKind = prefs.chat_kind === "smart" ? "smart" : "light";
+  $("mdl-name").textContent = (curKind === "smart" ? "🧠 " : "⚡ ") +
+    (curKind === "smart" ? smartName : lightName);
+  $("mdl-menu").innerHTML =
+    '<button type="button" data-k="light"' + (curKind === "light" ? ' class="sel"' : "") + ">" +
+    "⚡ Лёгкая<span class=\"d\">повседневный чат · " + esc(lightName) + "</span></button>" +
+    '<button type="button" data-k="smart"' + (curKind === "smart" ? ' class="sel"' : "") + ">" +
+    "🧠 Сложная<span class=\"d\">хранилище и pro · " + esc(smartName) + "</span></button>";
+  $("mdl-menu").querySelectorAll("button").forEach(b => b.onclick = async () => {
+    const r = await api("/api/prefs/kind", {kind: b.dataset.k});
+    if (!r.data.ok) return;
+    $("mdl-menu").classList.remove("open");
+    $("mdl-btn").classList.remove("open");
+    $("mdl-name").textContent = b.dataset.k === "smart" ? "🧠 Сложная" : "⚡ Лёгкая";
+    $("mdl-menu").querySelectorAll("button").forEach(x =>
+      x.classList.toggle("sel", x.dataset.k === r.data.kind));
+    if (ME.onboarding && ME.onboarding.prefs) ME.onboarding.prefs.chat_kind = r.data.kind;
   });
   $("mdl-btn").onclick = e => {
     e.stopPropagation();
