@@ -9,13 +9,16 @@ import threading
 import time
 
 import auth
+import config
 
 # ключи detail, безопасные для записи в журнал
 _SAFE_KEYS = {"service", "ok", "status", "path", "limit", "kind",
               "username", "error", "count", "prefix", "length",
               "skipped", "strategy",
               # Фаза C: digest/trash
-              "enabled", "date", "processed", "tokens", "trigger"}
+              "enabled", "date", "processed", "tokens", "trigger",
+              # Фаза D1: Telegram (id — только хеши, коды ошибок — safe)
+              "event", "result", "tg_user_hash", "error_code", "ip_hash"}
 
 _MAX_LINE = 4000  # jsonl-строки <4KB — достаточно для простого append
 
@@ -50,6 +53,26 @@ def log(uid, event, **detail):
             line = line[:_MAX_LINE]
         os.makedirs(auth.user_dir(uid), exist_ok=True)
         with open(_path(uid), "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+
+GLOBAL_PATH = os.path.join(config.DATA_DIR, "audit", "system.jsonl")
+
+
+def log_global(event, **detail):
+    """Системные события без uid (например, отклонённые webhook-запросы
+    Telegram). Тот же формат и то же маскирование, что у log()."""
+    try:
+        rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+               "event": str(event)[:40],
+               "detail": _mask(detail)}
+        line = json.dumps(rec, ensure_ascii=False)
+        if len(line) > _MAX_LINE:
+            line = line[:_MAX_LINE]
+        os.makedirs(os.path.dirname(GLOBAL_PATH), exist_ok=True)
+        with open(GLOBAL_PATH, "a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception:
         pass

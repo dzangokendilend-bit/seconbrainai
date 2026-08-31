@@ -2248,26 +2248,146 @@ function tabWiki(p) {
   drawWikiTree();
 }
 
-/* ── Telegram-бот: подключение токена и статус поллера ── */
-function tabTg(p) {
-  $("m-body").innerHTML = '<div id="tg-body" class="body"><p>загружаю статус…</p></div>';
-  const draw = async () => {
-    const s = await (await api("/api/tg/status", {})).data;
-    $("tg-body").innerHTML =
-      '<p class="sum">Модуль: <b>' + (s.module ? "вкл" : "выкл") + '</b> · токен: <b>' +
-      (s.configured ? "задан" : "нет") + '</b> · поллер: <b>' + (s.poller ? "работает" : "не запущен") + '</b></p>' +
-      '<label>Токен бота (от @BotFather)</label><input class="minput" id="tg-token" type="password">' +
-      '<label>Твой chat_id (узнать у @userinfobot)</label><input class="minput" id="tg-chat" type="text">' +
-      '<div class="row"><span class="sub">/note текст — заметка в vault, остальное — просто чат со мной</span>' +
-      '<button class="cs-act primary" id="tg-save">Подключить</button></div>' +
-      '<div class="err" id="tg-err"></div>';
-    $("tg-save").onclick = async () => {
-      const r = await api("/api/tg/setup", {token: $("tg-token").value.trim(), chat_id: $("tg-chat").value.trim()});
-      $("tg-err").textContent = r.data.ok ? "✅ подключён бот " + r.data.bot : r.data.error;
-      if (r.data.ok) setTimeout(draw, 800);
-    };
+/* ── Фаза D1: Интеграции → Telegram (безопасная привязка) ──
+   Состояния: не настроен / не подключён / ожидание (TTL-таймер, автоопрос
+   раз в 3с, обновление без перезагрузки) / подключён / код истёк /
+   ошибка привязки / «уже привязан к другому аккаунту». */
+let TG_POLL = null, TG_TIMER = null;
+let TG_LOCAL = null;   // локальные данные ожидания: {code, deep_link, expires_at}
+
+function tgFetchStatus() {
+  return api("/api/tg/link/status", {}, "GET").then(r => r.data);
+}
+
+function stopTgPolling() {
+  if (TG_POLL) { clearInterval(TG_POLL); TG_POLL = null; }
+  if (TG_TIMER) { clearInterval(TG_TIMER); TG_TIMER = null; }
+}
+
+function renderTgCard(box, st) {
+  if (!box) return;
+  let h = "";
+  if (!st.configured) {
+    h = '<div class="set-card"><div class="set-h">Telegram</div>' +
+      '<p class="sub" style="padding:0 16px 10px">Telegram-бот не настроен администратором.</p></div>';
+  } else if (st.notice === "conflict") {
+    h = '<div class="set-card"><div class="set-h">Telegram</div>' +
+      '<div class="err" style="padding:0 16px 10px">Этот Telegram-аккаунт уже привязан к другому аккаунту Моники.</div>' +
+      '<div class="row"><button class="cs-act primary" data-act="start">Подключить Telegram</button></div></div>';
+  } else if (st.link) {
+    h = '<div class="set-card"><div class="set-h">Telegram</div>' +
+      '<div class="tg-linked"><div class="tg-ava">✈️</div><div>' +
+      '<b>' + esc(st.link.display_name || "Telegram") + "</b>" +
+      (st.link.username ? '<span class="sub">@' + esc(st.link.username) + "</span>" : "") +
+      '<span class="sub">привязан: ' + esc(st.link.linked_at || "—") +
+      ' · статус бота: активен</span></div></div>' +
+      '<div class="row">' +
+      (st.bot_username ? '<a class="cs-act" href="https://t.me/' + esc(st.bot_username) +
+        '" target="_blank" rel="noopener">Открыть чат с ботом</a>' : "") +
+      '<button class="cs-act" data-act="unlink">Отвязать Telegram</button></div></div>';
+  } else if (TG_LOCAL && TG_LOCAL.expires_at > Date.now()) {
+    h = '<div class="set-card"><div class="set-h">Telegram</div>' +
+      '<p class="sum" style="padding:0 16px">⏳ Ожидаем подтверждение в Telegram…</p>' +
+      (TG_LOCAL.deep_link ? '<div class="row"><a class="cs-act primary" href="' + esc(TG_LOCAL.deep_link) +
+        '" target="_blank" rel="noopener">Открыть Telegram</a></div>' : "") +
+      (TG_LOCAL.code ? '<div class="sub" style="padding:0 16px">или отправь боту код вручную:</div>' +
+        '<div class="tg-code">' + esc(TG_LOCAL.code) + "</div>" +
+        '<div class="sub" style="padding:0 16px"><span class="tg-timer">Код действует 10 минут</span></div>' : "") +
+      '<div class="row"><button class="cs-act" data-act="start">Создать новый код</button>' +
+      '<button class="cs-act" data-act="cancel">Отменить</button></div></div>';
+  } else if (st.pending) {
+    /* код создан до перезагрузки страницы: сам код локально неизвестен */
+    h = '<div class="set-card"><div class="set-h">Telegram</div>' +
+      '<p class="sum" style="padding:0 16px">⏳ Ожидаем подтверждение в Telegram…</p>' +
+      '<div class="sub" style="padding:0 16px 10px">Код из прошлой сессии страницы недоступен — создай новый.</div>' +
+      '<div class="row"><button class="cs-act" data-act="start">Создать новый код</button>' +
+      '<button class="cs-act" data-act="cancel">Отменить</button></div></div>';
+  } else if (TG_LOCAL) {
+    h = '<div class="set-card"><div class="set-h">Telegram</div>' +
+      '<div class="err" style="padding:0 16px 10px">Код истёк. Создай новый.</div>' +
+      '<div class="row"><button class="cs-act primary" data-act="start">Создать новый код</button></div></div>';
+  } else {
+    h = '<div class="set-card"><div class="set-h">Telegram</div>' +
+      '<div class="tg-ava" style="margin:4px 16px 8px">✈️</div>' +
+      '<p style="padding:0 16px">Подключите Telegram, чтобы общаться с Моникой через бота.</p>' +
+      '<p class="sub" style="padding:0 16px 10px">Бот не получает доступ к заметкам автоматически.</p>' +
+      '<div class="row"><button class="cs-act primary" data-act="start">Подключить Telegram</button></div></div>';
+  }
+  box.innerHTML = h;
+  bindTgCard(box, st);
+}
+
+function bindTgCard(box, st) {
+  const start = async () => {
+    const r = await api("/api/tg/link/start", {});
+    if (r.data.error || !r.data.ok) {
+      TG_LOCAL = null;
+      stopTgPolling();
+      renderTgCard(box, Object.assign({}, st, {notice: null}));
+      const e = box.querySelector(".err");
+      if (e) e.textContent = r.data.error || "не удалось создать код";
+      return;
+    }
+    /* сервер отдаёт expires_at в секундах — приводим к мс Date.now() */
+    TG_LOCAL = {code: r.data.code, deep_link: r.data.deep_link,
+                expires_at: r.data.expires_at * 1000};
+    renderTgCard(box, st);
+    startTgPolling(box);
   };
-  draw();
+  box.querySelectorAll("[data-act]").forEach(b => b.onclick = async () => {
+    const act = b.dataset.act;
+    if (act === "start") {
+      stopTgPolling();
+      await start();
+    } else if (act === "cancel") {
+      await api("/api/tg/link/cancel", {});
+      TG_LOCAL = null;
+      stopTgPolling();
+      renderTgCard(box, st);
+    } else if (act === "unlink") {
+      if (!confirm("Отвязать Telegram? Бот перестанет отвечать этому аккаунту; история аудита сохранится.")) return;
+      await api("/api/tg/link/unlink", {});
+      TG_LOCAL = null;
+      stopTgPolling();
+      const s = await tgFetchStatus().catch(() => null);
+      if (s) renderTgCard(box, s);
+    }
+  });
+}
+
+function startTgPolling(box) {
+  stopTgPolling();
+  /* автоопрос статуса раз в ~3с: привязка подтверждена в Telegram →
+     UI переключается на «Подключён» без перезагрузки */
+  TG_POLL = setInterval(async () => {
+    if (!document.body.contains(box)) return stopTgPolling();
+    const s = await tgFetchStatus().catch(() => null);
+    if (!s) return;
+    if (s.link) {
+      TG_LOCAL = null;
+      stopTgPolling();
+      renderTgCard(box, s);
+    } else if (TG_LOCAL && Date.now() > TG_LOCAL.expires_at) {
+      stopTgPolling();
+      renderTgCard(box, s);
+    }
+  }, 3000);
+  TG_TIMER = setInterval(() => {
+    const t = box.querySelector(".tg-timer");
+    if (!t || !TG_LOCAL) return;
+    const left = Math.max(0, Math.round((TG_LOCAL.expires_at - Date.now()) / 1000));
+    t.textContent = "Код действует ещё " + Math.floor(left / 60) + ":" +
+      String(left % 60).padStart(2, "0");
+    if (left <= 0) {
+      stopTgPolling();
+      tgFetchStatus().then(s => renderTgCard(box, s)).catch(() => {});
+    }
+  }, 1000);
+}
+
+function tabTg(p) {
+  $("m-body").innerHTML = '<div id="tg-body" class="body"><p class="sum">загружаю статус…</p></div>';
+  tgFetchStatus().then(st => renderTgCard($("tg-body"), st)).catch(() => {});
 }
 
 /* ── Фаза B: Полная аналитика — re-auth, heatmap, импорт vault ── */
@@ -2420,7 +2540,7 @@ let SET_TAB = "profile";
 const SVC_NAMES = {glm: "GLM 5.3 Fast", smart: "OpenRouter", luna: "ChatGPT 5.6 Luna"};
 
 function tabSet(p) {
-  const tabs = [["profile", "Профиль"], ["keys", "Модели и ключи"], ["modules", "Модули"]];
+  const tabs = [["profile", "Профиль"], ["keys", "Модели и ключи"], ["modules", "Модули"], ["integrations", "Интеграции"]];
   $("m-body").innerHTML =
     '<div class="set-tabs">' + tabs.map(t =>
       '<button class="set-tab' + (SET_TAB === t[0] ? " on" : "") + '" data-t="' + t[0] + '">' + t[1] + "</button>").join("") +
@@ -2429,6 +2549,7 @@ function tabSet(p) {
     b.onclick = () => { SET_TAB = b.dataset.t; tabSet(p); });
   if (SET_TAB === "profile") setTabProfile(p);
   else if (SET_TAB === "keys") setTabKeys(p);
+  else if (SET_TAB === "integrations") setTabIntegrations(p);
   else setTabModules(p);
 }
 
@@ -2773,6 +2894,12 @@ function setTabModules(p) {
       "backfill готов: " + (r.data.path || d));
     drawJobs();
   };
+}
+
+/* ── Фаза D1: Настройки → Интеграции (карточка Telegram) ── */
+function setTabIntegrations(p) {
+  $("s-body").innerHTML = '<div id="tg-body" class="body"><p class="sum">загружаю статус…</p></div>';
+  tgFetchStatus().then(st => renderTgCard($("tg-body"), st)).catch(() => {});
 }
 
 /* ── загрузка ── */

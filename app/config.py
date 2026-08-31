@@ -23,3 +23,24 @@ DATA_DIR = os.path.join(ROOT, "data")
 USERS_DIR = os.path.join(DATA_DIR, "users")
 SESSIONS_PATH = os.path.join(DATA_DIR, "sessions", "sessions.json")
 WEB_DIR = os.path.join(ROOT, "app", "web")
+
+
+def _tg(name, key, default=""):
+    """Фаза D1: настройка Telegram — config.json с override через env.
+    Токен бота НЕ хардкодится и не должен попадать в логи/UI/ошибки."""
+    v = os.environ.get(name)
+    if v:
+        return v
+    return CFG.get(key, default)
+
+
+# Фаза D1: Telegram-интеграция. При отсутствии токена модуль выключен,
+# приложение работает как раньше.
+TG_TOKEN = str(_tg("TELEGRAM_BOT_TOKEN", "telegram_bot_token") or "")
+TG_BOT_USERNAME = str(_tg("TELEGRAM_BOT_USERNAME", "telegram_bot_username") or "")
+TG_WEBHOOK_SECRET = str(_tg("TELEGRAM_WEBHOOK_SECRET", "telegram_webhook_secret") or "")
+PUBLIC_APP_URL = str(_tg("PUBLIC_APP_URL", "public_app_url") or "")
+TG_LINK_TTL = int(_tg("TELEGRAM_LINK_TTL_SECONDS", "telegram_link_ttl_seconds", 600))
+TG_LINK_RATE_LIMIT = int(_tg("TELEGRAM_LINK_RATE_LIMIT", "telegram_link_rate_limit", 5))
+# dev-флаг: long polling только для разработки (webhook в бою)
+TG_DEV_POLLING = bool(CFG.get("telegram_dev_polling", False))

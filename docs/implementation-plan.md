@@ -13,7 +13,7 @@
 | Heatmap-аналитика | `/api/analytics/summary` (минимум) | `build_wiki.py`: `calendar_heatmap_svg`, `git_activity_by_day` | годовой период, метрики заметки/сообщения/сессии, часовой пояс, UI | B |
 | Расширенная аналитика (гейт) | `/api/analytics/check` + пароль `4221` (config) | PIN-подход build_wiki.py | re-auth своим паролем, краткоживущий флаг сессии | B |
 | Ночной digest | — | `account_watcher.py` (daily digest-заметки), `save_chat`→inbox | идемпотентная задача, provenance, история запусков, backfill | C |
-| Telegram привязка | `/api/tg/setup` (token+chat_id вручную), `tgbot.py` long polling | `telegram_bot.py` (полноценный бот) | одноразовый код привязки, панель прав | D |
+| Telegram привязка | **D1 ✅**: `tgbot.py` (один бот на инстанс, одноразовый hashed-код привязки, allowlist-команды, webhook+dev polling) | панель прав бота, полноценный бот | панель прав | D |
 | Проактивные сообщения | — | `_proactive_loop`, `/proactive on|off|hours|chance`, quiet hours | порт в per-user tgbot.py + opt-in в настройках | D |
 | Стикеры | — | `stickers.json`, `pick_sticker`, `handle_incoming_sticker`, `describe_sticker` | каталог per-user, веса, cooldown, UI-библиотека | D |
 | Кастомные TG-команды | — | `/settings`, `/proactive` (парсинг команд) | декларативные команды, allowlist, dry-run | E |
@@ -100,7 +100,16 @@ smoke 152/152 (было 141).
 Зависимости: B (jobs, импорт).
 
 ### Фаза D — «Telegram 2.0»
-Состав: одноразовый код привязки, панель прав бота, проактивные сообщения
+**D1 выполнен (безопасная привязка + минимальный TG-MVP):** один бот на инстанс
+(токен администратора в config.json/env, при отсутствии — модуль выключен),
+одноразовый URL-safe linking token (sha256-хеш в data/telegram/link_tokens.json,
+TTL 600с, attempts ≤5, новый код инвалидирует старый, rate limit 5/час на uid+IP),
+привязка через /start только в private chat с conflict detection, allowlist
+команд (/start /help /status /open /unlink), webhook /api/telegram/webhook/<secret>
++ dev polling по явному флагу, дедуп update_id (последние 1000), TG audit events
+с хешированными id, UI: Настройки→Интеграции→Telegram (полный state machine,
+автоопрос 3с, confirm при отвязке). D2 (проактивные, стикеры) — не начат.
+Состав (остаток): панель прав бота, проактивные сообщения
 (порт `_proactive_loop` + quiet hours + opt-in), библиотека стикеров
 (порт stickers.json/pick_sticker с весами и cooldown).
 Критерии: привязка без ручного chat_id; бот молчит в quiet hours; стикер

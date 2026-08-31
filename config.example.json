@@ -4,6 +4,13 @@
   "machine_secret": "GENERATE_hex64",
   "session_ttl_hours": 12,
   "mock_llm": true,
+  "telegram_bot_token": "",
+  "telegram_bot_username": "",
+  "telegram_webhook_secret": "",
+  "public_app_url": "",
+  "telegram_link_ttl_seconds": 600,
+  "telegram_link_rate_limit": 5,
+  "telegram_dev_polling": false,
   "providers": {
     "glm": {
       "base_url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",

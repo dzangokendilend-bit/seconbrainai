@@ -266,7 +266,7 @@ const consoleErrors = [], badResponses = [];
   ok("Фаза B: мастер импорта ZIP в tabAna", await page.$("#imp-file"));
   await tab("set", ".set-tab.on", "вкладки настроек");
   const setTabs = await page.$$eval(".set-tab", els => els.length).catch(() => 0);
-  ok("настройки: 3 вкладки — Профиль/Модели и ключи/Модули (факт " + setTabs + ")", setTabs === 3);
+  ok("настройки: 4 вкладки — Профиль/Модели и ключи/Модули/Интеграции (факт " + setTabs + ")", setTabs === 4);
   ok("настройки: профиль по умолчанию — форма юзернейма", await page.$("#p-user"));
   /* Фаза 5-B/5-D: вкладка «Модели и ключи» */
   await page.click('.set-tab[data-t="keys"]');
@@ -838,6 +838,180 @@ const consoleErrors = [], badResponses = [];
   ok("Фаза C: injection-тест «данные ≠ инструкции» (wrap_data, system-промпты, generate_article) — " +
     injOut.trim().split("\n").pop(), /^OK 3/m.test(injOut));
   try { fs.unlinkSync(injPy); } catch (e) {}
+
+  /* ── Фаза D1: безопасная привязка Telegram (API + юнит-скрипт, без реального Telegram API) ── */
+  const cfgD1 = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "config.json"), "utf8"));
+  const TG_SECRET = cfgD1.telegram_webhook_secret || "";
+  const TG_TOKEN_STR = cfgD1.telegram_bot_token || "";
+  const meD1 = await apiRaw("/api/me");
+  const uidD1 = (meD1.data.profile || {}).user_id;
+  const stD1 = await apiRaw("/api/tg/link/status");
+  ok("D1: GET /api/tg/link/status → ok, configured из конфига, bot_username",
+    stD1.status === 200 && stD1.data.ok && stD1.data.configured === true &&
+    stD1.data.bot_username === cfgD1.telegram_bot_username);
+  const lt1 = await apiRaw("/api/tg/link/start", {method: "POST", body: "{}"});
+  ok("D1: POST /api/tg/link/start → код ≤64 + deep link t.me?start= + TTL 600 (или 429 на повторном прогоне)",
+    (lt1.status === 200 && lt1.data.ok && lt1.data.code &&
+     lt1.data.code.length <= 64 &&
+     lt1.data.deep_link === "https://t.me/" + stD1.data.bot_username + "?start=" + lt1.data.code &&
+     lt1.data.ttl === 600) || lt1.status === 429);
+  const lt2 = await apiRaw("/api/tg/link/start", {method: "POST", body: "{}"});
+  /* при повторных прогонах smoke в течение часа срабатывает rate limit 5/час —
+     это корректное поведение; жизненный цикл токенов строго покрывает юнит-скрипт */
+  ok("D1: повторный start → новый код (или 429 rate limit на повторном прогоне)",
+    (lt2.status === 200 && lt2.data.ok && lt2.data.code && lt2.data.code !== lt1.data.code) ||
+    lt2.status === 429);
+  const tokRecs = JSON.parse(fs.readFileSync(
+    path.join(__dirname, "..", "data", "telegram", "link_tokens.json"), "utf8"));
+  ok("D1: токен хранится только как sha256-хеш (hash ≠ код, кода нет в файле)",
+    tokRecs.filter(r => r.monica_user_id === uidD1).length >= 2 &&
+    tokRecs.every(r => r.token_hash && r.token_hash.length === 64) &&
+    !JSON.stringify(tokRecs).includes(lt1.data.code) &&
+    !JSON.stringify(tokRecs).includes(lt2.data.code));
+  /* юнит-скрипт: жизненный цикл токенов + команды + conflict/group/duplicate */
+  const unitTg = path.join(tmpDir, "test_tg_unit.py");
+  fs.writeFileSync(unitTg, [
+    "import os, sys, json, time, shutil",
+    "sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'app'))",
+    "import tgbot, audit, auth, config",
+    "n = 0",
+    "sent = []",
+    "def send(chat_id, text): sent.append((chat_id, text))",
+    "def last(): return sent[-1][1] if sent else ''",
+    "uid = sys.argv[1]",
+    "base = int(time.time()) % 700000000 + 100000",
+    "tgbot.unlink(uid)",
+    "# 1: создание токена — hash != token, TTL 600, длина <= 64",
+    "tok, exp = tgbot.create_link_token(uid, ip='10.0.0.1')",
+    "assert tok and len(tok) <= 64; n += 1",
+    "recs = tgbot._load(tgbot.TOKENS_PATH, [])",
+    "rec = [r for r in recs if r['monica_user_id'] == uid and not r.get('revoked_at') and not r.get('used_at')][-1]",
+    "assert rec['token_hash'] != tok and len(rec['token_hash']) == 64; n += 1",
+    "assert tok not in json.dumps(recs); n += 1",
+    "assert abs(rec['expires_at'] - rec['created_at'] - 600) < 1; n += 1",
+    "# 2: повторное создание инвалидирует старый",
+    "tok2, _ = tgbot.create_link_token(uid, ip='10.0.0.1')",
+    "u, err = tgbot.consume_link_token(tok)",
+    "assert u is None and err == 'revoked'; n += 1",
+    "# 3: валидный /start -> ровно одна привязка",
+    "def upd(i, tg, ctype, text):",
+    "    return {'update_id': i, 'message': {'message_id': i, 'date': 1,",
+    "        'chat': {'id': tg, 'type': ctype},",
+    "        'from': {'id': tg, 'is_bot': False, 'first_name': 'Tester', 'username': 'tester_tg'},",
+    "        'text': text}}",
+    "TG = 900001",
+    "r = tgbot.handle_update(upd(base + 1, TG, 'private', '/start ' + tok2), send)",
+    "assert r.get('linked') is True; n += 1",
+    "assert tgbot.get_uid_by_tg(TG) == uid; n += 1",
+    "assert last() == tgbot.MSG_CONNECTED; n += 1",
+    "links = tgbot._load(tgbot.LINKS_PATH, {})",
+    "assert sum(1 for l in links.values() if str(l.get('telegram_user_id')) == str(TG)) == 1; n += 1",
+    "# 4: использованный токен второй раз не работает",
+    "u, err = tgbot.consume_link_token(tok2)",
+    "assert u is None and err == 'used'; n += 1",
+    "# 5: истёкший токен не связывает",
+    "tok3, _ = tgbot.create_link_token(uid, ip='10.0.0.1')",
+    "recs = tgbot._load(tgbot.TOKENS_PATH, [])",
+    "for r_ in recs:",
+    "    if r_.get('token_hash') == tgbot._hash(tok3): r_['expires_at'] = time.time() - 10",
+    "tgbot._save(tgbot.TOKENS_PATH, recs)",
+    "TG2 = 900002",
+    "r = tgbot.handle_update(upd(base + 2, TG2, 'private', '/start ' + tok3), send)",
+    "assert not r.get('linked') and tgbot.get_uid_by_tg(TG2) is None; n += 1",
+    "assert 'недействителен' in last(); n += 1",
+    "# 6: конфликт — TG уже у другого аккаунта, без перепривязки",
+    "other = auth.create_user('tg_d1_tmp', 'tmpsecret1', None, {})",
+    "ouid = other['user_id']",
+    "tok4, _ = tgbot.create_link_token(ouid, ip='10.0.0.2')",
+    "r = tgbot.handle_update(upd(base + 3, TG, 'private', '/start ' + tok4), send)",
+    "assert r.get('conflict') is True; n += 1",
+    "assert tgbot.get_uid_by_tg(TG) == uid; n += 1",
+    "assert last() == tgbot.MSG_CONFLICT; n += 1",
+    "# 7: групповой чат -> короткий отказ",
+    "tok5, _ = tgbot.create_link_token(uid, ip='10.0.0.1')",
+    "r = tgbot.handle_update(upd(base + 4, -100300, 'group', '/start ' + tok5), send)",
+    "assert r.get('group') is True and last() == tgbot.MSG_GROUP; n += 1",
+    "assert tgbot.get_uid_by_tg(TG) == uid; n += 1",
+    "# 8: команды allowlist",
+    "ctr = [base + 100]",
+    "def cmd(text, tg=TG):",
+    "    ctr[0] += 1",
+    "    return tgbot.handle_update(upd(ctr[0], tg, 'private', text), send)",
+    "cmd('/help'); assert '/status' in last() and '/open' in last() and '/unlink' in last(); n += 1",
+    "cmd('/status'); assert last() == 'Подключено'; n += 1",
+    "cmd('/open')",
+    "assert ('не настроена' in last()) if not config.PUBLIC_APP_URL else (config.PUBLIC_APP_URL in last()); n += 1",
+    "before = tgbot.get_uid_by_tg(TG)",
+    "cmd('/unlink'); assert tgbot.get_uid_by_tg(TG) == before; n += 1",
+    "cmd('/whatever'); assert last() == tgbot.MSG_UNKNOWN; n += 1",
+    "cmd('/status', tg=TG2); assert last() == 'Не подключено'; n += 1",
+    "# 9: duplicate update_id не обрабатывается дважды",
+    "cmd('/help')",
+    "dup = tgbot.handle_update({'update_id': ctr[0], 'message': {'message_id': 1, 'date': 1,",
+    "    'chat': {'id': TG, 'type': 'private'}, 'from': {'id': TG, 'is_bot': False}, 'text': '/help'}}, send)",
+    "assert dup.get('duplicate') is True; n += 1",
+    "# 10: /start с неверным кодом -> нейтрально, привязки нет",
+    "r = cmd('/start totally-bogus-code-xyz', tg=TG2)",
+    "assert not r.get('linked') and 'недействителен' in last(); n += 1",
+    "# 11: rate limit создания токенов",
+    "made = 0",
+    "for i in range(10):",
+    "    t, _ = tgbot.create_link_token(ouid, ip='10.0.0.3')",
+    "    if t: made += 1",
+    "assert made == max(0, config.TG_LINK_RATE_LIMIT - 1); n += 1",
+    "# 12: токен не попадает в audit log",
+    "ap = os.path.join(auth.user_dir(uid), 'audit.jsonl')",
+    "atext = open(ap, encoding='utf-8').read() if os.path.exists(ap) else ''",
+    "assert tok not in atext and tok2 not in atext and tok3 not in atext; n += 1",
+    "# cleanup",
+    "tgbot.unlink(uid)",
+    "idx = auth._load_index()",
+    "idx.pop('tg_d1_tmp', None)",
+    "auth._save_index(idx)",
+    "shutil.rmtree(auth.user_dir(ouid), ignore_errors=True)",
+    "print('OK', n)"].join("\n"));
+  let tgOut = "";
+  try {
+    tgOut = execSync('python "' + unitTg + '" ' + uidD1, {encoding: "utf8"});
+  } catch (e) {
+    tgOut = String((e && e.stdout) || "") + " " + String((e && e.message) || e);
+  }
+  ok("D1: юнит-скрипт tg-link (hash/TTL/одноразовость/истёкший/conflict/group/команды/duplicate/rate limit/audit) — " +
+    tgOut.trim().split("\n").pop(), /^OK \d+/m.test(tgOut));
+  try { fs.unlinkSync(unitTg); } catch (e) {}
+  /* webhook: секрет обязателен, неверный → 403; дедуп update_id */
+  const whUpd = JSON.stringify({update_id: 987000000 + (Date.now() % 1000000),
+    message: {message_id: 1, date: 1, chat: {id: 1, type: "private"},
+              from: {id: 1, is_bot: false, first_name: "T"}}});
+  const whBad = await apiRaw("/api/telegram/webhook/wrong-secret",
+    {method: "POST", body: whUpd});
+  ok("D1: webhook с неверным secret → 403", whBad.status === 403);
+  if (TG_SECRET) {
+    const whOk = await apiRaw("/api/telegram/webhook/" + TG_SECRET,
+      {method: "POST", body: whUpd});
+    ok("D1: webhook с верным secret → 200 ok (update без текста — без ответа)",
+      whOk.status === 200 && whOk.data.ok === true);
+    const whDup = await apiRaw("/api/telegram/webhook/" + TG_SECRET,
+      {method: "POST", body: whUpd});
+    ok("D1: duplicate update_id через webhook → duplicate=true",
+      whDup.status === 200 && whDup.data.duplicate === true);
+  } else {
+    ok("D1: webhook secret не задан — webhook выключен (пропуск)", true);
+  }
+  /* отвязка через веб */
+  const ulD1 = await apiRaw("/api/tg/link/unlink", {method: "POST", body: "{}"});
+  const stD1b = await apiRaw("/api/tg/link/status");
+  ok("D1: отвязка через веб → /status link=null",
+    ulD1.status === 200 && ulD1.data.ok && stD1b.data.link === null);
+  /* bot token нигде не светится */
+  const sysAudit = path.join(__dirname, "..", "data", "audit", "system.jsonl");
+  const userAudit = path.join(__dirname, "..", "data", "users", uidD1, "audit.jsonl");
+  const auditAll = (fs.existsSync(sysAudit) ? fs.readFileSync(sysAudit, "utf8") : "") +
+    (fs.existsSync(userAudit) ? fs.readFileSync(userAudit, "utf8") : "");
+  ok("D1: bot token не появляется в /api/me, /api/tg/link/status и audit",
+    !JSON.stringify(meD1.data).includes(TG_TOKEN_STR) &&
+    !JSON.stringify(stD1b.data).includes(TG_TOKEN_STR) &&
+    !auditAll.includes(TG_TOKEN_STR));
 
   /* UI: настройки digest в «Модулях» */
   await page.click('.cs-navitem[data-tab="set"]');

@@ -1,5 +1,6 @@
 # Моника 1.0 — точка входа. Фаза 1: пользователи и онбординг.
 import base64
+import hmac
 import io
 import json
 import os
@@ -93,6 +94,24 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     # ── служебное ──
+
+    def _tg_link_status(self):
+        """Фаза D1: статус привязки Telegram (GET из UI и POST-вариант)."""
+        uid = self._uid()
+        if not uid:
+            self._json({"error": "нужен вход"}, 401)
+            return
+        link = tgbot.get_link_by_uid(uid)
+        self._json({"ok": True,
+                    "configured": bool(config.TG_TOKEN),
+                    "bot_username": config.TG_BOT_USERNAME,
+                    "link": {
+                        "display_name": link.get("display_name"),
+                        "username": link.get("username"),
+                        "linked_at": link.get("linked_at"),
+                    } if link else None,
+                    "pending": tgbot.active_token_meta(uid),
+                    "notice": tgbot.pop_notice(uid)})
 
     def _json(self, obj, status=200, set_cookie=None, clear_cookie=False):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
@@ -354,6 +373,11 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 self._json({"ok": True, "report": rep})
             return
+        if path == "/api/tg/link/status":
+            # Фаза D1: статус привязки Telegram для карточки «Интеграции»
+            # (GET из UI; тот же ответ доступен и через POST)
+            self._tg_link_status()
+            return
         if path == "/api/wiki/read":
             # реворк вики: реальный файл по полному относительному пути
             # (GET ?path=…; тот же маршрут доступен и через POST)
@@ -401,8 +425,34 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── POST ──
 
+    def _handle_tg_webhook(self, path):
+        """Фаза D1: POST /api/telegram/webhook/<secret>. Секрет обязателен:
+        если telegram_webhook_secret не задан — webhook выключен (403).
+        Сравнение константным временем; update обрабатывается общим
+        tgbot.handle_update (дедуп update_id, private-only, allowlist)."""
+        secret = path[len("/api/telegram/webhook/"):]
+        if (not config.TG_WEBHOOK_SECRET
+                or not hmac.compare_digest(secret, config.TG_WEBHOOK_SECRET)):
+            audit.log_global("telegram_webhook_rejected",
+                             result="rejected", error_code="bad_secret")
+            self._json({"error": "forbidden"}, 403)
+            return
+        body = self._body()
+        if body is None:
+            self._json({"error": "пустой или слишком большой запрос"}, 400)
+            return
+        try:
+            res = tgbot.handle_update(body, tgbot.make_sender())
+        except Exception:
+            res = {"ok": False}
+        self._json({"ok": True, "duplicate": bool(res.get("duplicate"))})
+
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
+        if path.startswith("/api/telegram/webhook/"):
+            # до разбора сессии: Telegram не имеет cookie; секрет в пути
+            self._handle_tg_webhook(path)
+            return
         if path in IMPORT_UPLOAD_PATHS:
             # Фаза B+: стриминговая загрузка ZIP мимо MAX_BODY (2 ГБ в temp)
             self._handle_import(path)
@@ -1136,30 +1186,33 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"backlinks": mon_mods.backlinks(vault, title)})
             return
 
-        if path == "/api/tg/setup":
-            token = (body.get("token") or "").strip()
-            chat_id = str(body.get("chat_id") or "").strip()
-            if len(token) < 20 or not chat_id:
-                self._json({"error": "нужны token бота и твой chat_id"}, 400)
-                return
-            try:
-                me_bot = tgbot._api(token, "getMe")
-            except Exception as e:
-                self._json({"error": "токен не работает: " + str(e)[:120]}, 400)
-                return
-            tgbot.save_cfg(uid, token, chat_id)
-            p = auth.load_profile(uid)
-            if p.get("modules", {}).get("telegram"):
-                tgbot.start(uid)
-            self._json({"ok": True, "bot": "@" + str(me_bot.get("result", {}).get("username", "?"))})
+        # ── Фаза D1: безопасная привязка Telegram (Настройки → Интеграции) ──
+        if path == "/api/tg/link/status":
+            self._tg_link_status()
             return
 
-        if path == "/api/tg/status":
-            p = auth.load_profile(uid)
-            cfgv = tgbot.load_cfg(uid)
-            self._json({"configured": bool(cfgv.get("token")),
-                        "poller": tgbot.running(uid),
-                        "module": bool(p.get("modules", {}).get("telegram"))})
+        if path == "/api/tg/link/start":
+            if not config.TG_TOKEN:
+                self._json({"error": "Telegram-бот не настроен администратором"}, 400)
+                return
+            token, expires_at = tgbot.create_link_token(uid, self.client_address[0])
+            if not token:
+                self._json({"error": "слишком много запросов, подожди час"}, 429)
+                return
+            deep = ("https://t.me/" + config.TG_BOT_USERNAME + "?start=" + token
+                    if config.TG_BOT_USERNAME else None)
+            self._json({"ok": True, "code": token, "deep_link": deep,
+                        "expires_at": expires_at, "ttl": config.TG_LINK_TTL})
+            return
+
+        if path == "/api/tg/link/cancel":
+            tgbot.revoke_active_tokens(uid)
+            self._json({"ok": True})
+            return
+
+        if path == "/api/tg/link/unlink":
+            tgbot.unlink(uid)
+            self._json({"ok": True})
             return
 
         self._json({"error": "неизвестный маршрут"}, 404)
