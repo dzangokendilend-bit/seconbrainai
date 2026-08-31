@@ -4,11 +4,11 @@
 const $ = id => document.getElementById(id);
 const esc = s => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-async function api(path, body) {
-  const r = await fetch(path, {
-    method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(body || {})
-  });
+async function api(path, body, method) {
+  const m = method || "POST";
+  const opts = {method: m, headers: {"Content-Type": "application/json"}};
+  if (m !== "GET") opts.body = JSON.stringify(body || {}); // GET не несёт body
+  const r = await fetch(path, opts);
   return {status: r.status, data: await r.json().catch(() => ({}))};
 }
 
@@ -2154,12 +2154,22 @@ function setTabProfile(p) {
 function setTabKeys(p) {
   const kmask = p.keys_masked || {};
   const kstat = p.keys_status || {};
+  /* Фаза A: расширенные статусы ключей — зелёный ok, жёлтый quota,
+     красный invalid/permissions, серый unavailable/network, тусклый «не проверялся» */
   const dot = s => {
     if (!kmask[s]) return '<span class="kdot none" title="не задан"></span>';
     const st = kstat[s];
     if (!st) return '<span class="kdot unknown" title="не проверялся"></span>';
-    return st.ok ? '<span class="kdot ok" title="проверен: живой"></span>'
-      : '<span class="kdot bad" title="проверка не прошла"></span>';
+    const map = {
+      ok: ["ok", "проверен: живой"],
+      quota: ["quota", "квота провайдера исчерпана"],
+      permissions: ["bad", "доступ запрещён"],
+      invalid: ["bad", "ключ неверен"],
+      unavailable: ["off", "сервис недоступен"],
+      network: ["off", "сеть недоступна"]};
+    const key = st.status || (st.ok ? "ok" : "invalid");
+    const m = map[key] || map.invalid;
+    return '<span class="kdot ' + m[0] + '" title="' + m[1] + '"></span>';
   };
   const prefs = (p.onboarding || {}).prefs || {};
   const lc = prefs.light || {}, sc = prefs.smart || {};
@@ -2179,6 +2189,16 @@ function setTabKeys(p) {
     '<button class="cs-act primary" id="cm-save">Сохранить модели</button></div></div>' +
     '<div class="cs-menu"><div class="cs-menu-h">Модель по умолчанию (реестр)</div>' +
     '<div id="s-mlist" style="padding:8px 12px 12px"></div></div>' +
+    '<div class="cs-menu"><div class="cs-menu-h">Лимиты и использование</div>' +
+    '<div style="padding:8px 12px 12px">' +
+    '<div class="mrow" style="padding:0 0 8px">' +
+    '<input class="minput" id="bud-limit" type="number" min="1000" max="10000000" style="margin:0;width:150px" placeholder="лимит токенов/день">' +
+    '<button class="cs-act primary" id="bud-save">Сохранить лимит</button></div>' +
+    '<div class="bud-meter"><div class="bar"><i id="bud-bar"></i></div>' +
+    '<span class="sub" id="bud-cap">…</span></div>' +
+    '<div class="sub" style="margin:6px 0 0">сброс в полночь · ⚡ light: <b id="bud-light">0</b>' +
+    ' · 🧠 smart: <b id="bud-smart">0</b></div>' +
+    '</div></div>' +
     '<div class="cs-menu"><div class="cs-menu-h">Ключи API (маскированы)</div>' +
     Object.keys(SVC_NAMES).map(s =>
       '<div class="cs-menu-row">' + dot(s) + SVC_NAMES[s] + ': <b>' + (kmask[s] || "не задан") + '</b>' +
@@ -2245,6 +2265,25 @@ function setTabKeys(p) {
   $("s-apply").onclick = () => {
     const val = $("s-val").value.trim();
     if (val) saveKey($("k-svc").value, val, true);
+  };
+  /* Фаза A: блок «Лимиты и использование» — GET/PUT /api/budget */
+  api("/api/budget", {}, "GET").then(r => {
+    const b = r.data && r.data.budget;
+    if (!b || !$("bud-limit")) return;
+    $("bud-limit").value = b.limit;
+    const pct = b.limit > 0 ? Math.min(100, Math.round((b.used_total || 0) * 100 / b.limit)) : 0;
+    $("bud-bar").style.width = pct + "%";
+    $("bud-cap").textContent = "использовано " + (b.used_total || 0) +
+      " / осталось " + (b.remaining === null ? "∞" : b.remaining);
+    $("bud-light").textContent = (b.by_model && b.by_model.light) || 0;
+    $("bud-smart").textContent = (b.by_model && b.by_model.smart) || 0;
+  }).catch(() => {});
+  $("bud-save").onclick = async () => {
+    const v = parseInt($("bud-limit").value, 10);
+    if (!v) return setFail("укажи лимит (число)");
+    const r = await api("/api/budget", {limit: v}, "PUT");
+    if (r.data.error) return setFail(r.data.error);
+    setOk("дневной лимит сохранён: " + v);
   };
 }
 

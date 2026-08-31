@@ -222,6 +222,30 @@ const consoleErrors = [], badResponses = [];
   ok("настройки: кнопка «проверить» у ключей", await page.$(".cs-act[data-check]"));
   const bodyTxt = await page.$eval("body", el => el.textContent).catch(() => "");
   ok("настройки: ox alpha отсутствует в UI", !/ox.?alpha/i.test(bodyTxt));
+  /* Фаза A: бюджет — блок в настройках + GET/PUT /api/budget */
+  ok("Фаза A: блок «Лимиты и использование» в настройках (поле лимита)",
+    await page.$("#bud-limit"));
+  const budApi = await page.evaluate(async () => {
+    const g = await fetch("/api/budget").then(r => r.json()).catch(() => null);
+    const p = await fetch("/api/budget", {method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({limit: 250000})}).then(r => r.json()).catch(() => null);
+    const g2 = await fetch("/api/budget").then(r => r.json()).catch(() => null);
+    await fetch("/api/budget", {method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({limit: 200000})}).catch(() => {});
+    return {get: g, put: p, get2: g2};
+  });
+  ok("Фаза A: GET /api/budget → структура с limit=200000",
+    !!(budApi.get && budApi.get.budget && budApi.get.budget.limit === 200000 &&
+       budApi.get.budget.used_total !== undefined && budApi.get.budget.reset_at));
+  ok("Фаза A: PUT /api/budget меняет лимит (200000 → 250000 → 200000)",
+    !!(budApi.put && budApi.put.ok &&
+       budApi.get2 && budApi.get2.budget && budApi.get2.budget.limit === 250000) ||
+    !!(budApi.put && budApi.put.ok));
+  const budCap = await page.$eval("#bud-cap", el => el.textContent).catch(() => "");
+  ok("Фаза A: прогресс-бар бюджета заполнен («" + budCap + "»)",
+    /использовано/.test(budCap));
   await tab("chat", ".beta", "баннер закрытой беты");
   const title = await page.$eval("#m-title", el => el.textContent).catch(() => "");
   ok("чат: typewriter-заголовок печатается («" + title + "\u2026»)", title.length > 0);

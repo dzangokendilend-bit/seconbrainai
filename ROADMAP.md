@@ -32,7 +32,8 @@
 
 ## 2. Где мы сейчас
 
-(этот коммит) Phase 8-prep: деплой-инструменты — tools/backup.py (zip data/ + ротация), HTTPS-опция в server.py (ssl в config.json), автозапуск (start_monica.bat + install_autostart.bat) ← HEAD
+(этот коммит) Фаза A «Фундамент безопасности и бюджетов»: app/budget.py (дневной лимит 200k, атомарный reserve через lock-файл, разбивка light/smart, сброс в полночь), app/audit.py (append-only audit.jsonl с маскированием), rate limits (login 10/мин на IP, chat/terminal 30/мин на uid), providers.ping() → ok/quota/permissions/unavailable/invalid/network, UI «Лимиты и использование» в настройках, smoke 80/80 ← HEAD
+Phase 8-prep: деплой-инструменты — tools/backup.py (zip data/ + ротация), HTTPS-опция в server.py (ssl в config.json), автозапуск (start_monica.bat + install_autostart.bat)
 f768811 fix round 6: переключатель моделей в чате = роли «⚡ Лёгкая / 🧠 Сложная» (/api/prefs/kind, resolve_model учитывает chat_kind); вкладки настроек скроллятся с контентом
 5aa4a75 Phase 7 prep: tools/import_vault.py + tools/cleanup_users.py; 6-F закрыта
 d0f067d Phase 6-M: Медиа — app/media.py (Groq Whisper, ffmpeg-кадры, attachments), файлы в чате (до 5 ≤10МБ), слоты композера, ключ Groq в реестре
@@ -58,7 +59,8 @@ e4d33e9 fix: клики по бета-баннеру (pointer-events)
 
 Готово: каркас пользователей, онбординг 2.0 («Ритуал запуска» + «Живое ядро»), чат
 со стримингом и медиа-вложениями, Терминал 2.1, вики 1:1, проекты сессий,
-настройки ×3 (glassmorphism), роли моделей в чате, ui_smoke 76/76.
+настройки ×3 (glassmorphism), роли моделей в чате, Фаза A (бюджеты, аудит,
+rate limits, состояния ключей), ui_smoke 80/80.
 `mock_llm: true` — модели пока заглушки (переключает автор при наличии ключей).
 
 ## 3. Дорожная карта
@@ -74,6 +76,7 @@ e4d33e9 fix: клики по бета-баннеру (pointer-events)
 | **6-N** | **Настройки 2.0 — наполнение** (приоритет автора) | 1) дата создания аккаунта в Профиле; 2) «Экспорт данных» — zip (vault + профиль + история) через /api/profile/export; 3) индикатор силы пароля при смене; 4) цветовые статусы ключей (проверен/ошибка/не проверялся); 5) показ и правка пары light/smart моделей из онбординга; 6) fix: .cs-menu (absolute из style.css) в настройках → static | server.py (+export, +custom-models, +keys_status), app.js (setTab*), monica.css | ✅ |
 | **6-M** | **Медиа: фото/видео/файлы/голос** | app/media.py: Groq Whisper (голос), ffmpeg-кадры (видео→vision), save_attachment (до 5 файлов ≤10МБ в attachments/); /api/chat(+stream) принимают files[]; композер: активация слотов, превью вложений; ключ groq в KEY_SERVICES | app/media.py (новый), server.py, providers.py, app.js, onboarding.py | ✅ |
 | 6-F | хвосты 5-I | кликабельность @sozrelyy (e4d33e9 + smoke-проверка), отступы — закрыто попутными фиксами | app.js, monica.css | ✅ |
+| **A** | **Фундамент безопасности и бюджетов** (новый этап) | budget.py (дневной лимит, lock-резерв, сброс в полночь), audit.py (audit.jsonl, маскирование), rate limits, ping()-состояния, UI «Лимиты и использование» | app/budget.py (новый), app/audit.py (новый), providers.py, server.py, app.js, monica.css | ✅ |
 | 7 | боевой режим | инструменты готовы: tools/import_vault.py (импорт .md с --enqueue/--overwrite), tools/cleanup_users.py (чистка тестеров, dry-run + --delete). Живые модели: переключение mock_llm=false — делает автор при наличии ключей (smoke рассчитан на mock) | config.json, tools/ | ◐ |
 | 8 | деплой | инструменты готовы (8-prep): tools/backup.py (zip data/ + ротация --keep), HTTPS-опция в server.py (config.json → "ssl": {"cert","key"}), start_monica.bat + install_autostart.bat (schtasks). Осталось за автором: хостинг/проброс порта, сертификат | tools/, server.py, config.example.json | ◐ |
 | 9 | полировка по фидбеку беты | темы, i18n, экспорт заметок, аналитика-визуализации | — | ☐ |

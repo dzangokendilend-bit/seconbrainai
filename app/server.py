@@ -12,7 +12,9 @@ from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import audit
 import auth
+import budget
 import config
 import history as hist
 import keys as keys_mod
@@ -155,6 +157,22 @@ class Handler(BaseHTTPRequestHandler):
                         "key_labels": onboarding.KEY_LABELS,
                         "default_model": onboarding.DEFAULT_MODEL})
             return
+        if path == "/api/budget":
+            # Фаза A: дневной лимит токенов — статус для UI настроек
+            uid = self._uid()
+            if not uid:
+                self._json({"error": "нужен вход"}, 401)
+                return
+            self._json({"ok": True, "budget": budget.status(uid)})
+            return
+        if path == "/api/audit":
+            # Фаза A: последние 100 записей аудита (UI — позже)
+            uid = self._uid()
+            if not uid:
+                self._json({"error": "нужен вход"}, 401)
+                return
+            self._json({"ok": True, "events": audit.recent(uid, 100)})
+            return
         if path in ("/", "/index.html"):
             self._serve_file("index.html", "text/html; charset=utf-8")
             return
@@ -254,10 +272,18 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/login":
+            # Фаза A: rate limit 10/мин на IP (риск 3 — brute-force)
+            if not audit.rate_limit("login:" + self.client_address[0], 10):
+                self._json({"error": "слишком много запросов, подожди минуту"}, 429)
+                return
             uid = auth.verify_login(body.get("username"), body.get("password"))
             if not uid:
+                fail_uid = auth.find_uid(body.get("username"))
+                if fail_uid:
+                    audit.log(fail_uid, "login_fail")
                 self._json({"error": "неверный юзернейм или пароль"}, 401)
                 return
+            audit.log(uid, "login_ok")
             token, _ = auth.create_session(uid)
             self._json({"ok": True}, 200, set_cookie=token)
             return
@@ -267,6 +293,16 @@ class Handler(BaseHTTPRequestHandler):
         if not uid:
             self._json({"error": "нужен вход"}, 401)
             return
+
+        # Фаза A: rate limits 30/мин на uid (chat/stream, terminal)
+        if path in ("/api/chat", "/api/chat/stream"):
+            if not audit.rate_limit("chat:" + uid, 30):
+                self._json({"error": "слишком много запросов, подожди минуту"}, 429)
+                return
+        elif path == "/api/terminal":
+            if not audit.rate_limit("term:" + uid, 30):
+                self._json({"error": "слишком много запросов, подожди минуту"}, 429)
+                return
 
         if path == "/api/logout":
             c = cookies.SimpleCookie(self.headers.get("Cookie", ""))
@@ -283,11 +319,14 @@ class Handler(BaseHTTPRequestHandler):
             cur = keys_mod.load_keys(config.MACHINE_SECRET, uid)
             cur[svc] = value
             keys_mod.save_keys(config.MACHINE_SECRET, uid, cur)
+            audit.log(uid, "key_save", service=svc, length=len(value))
             resp = {"ok": True, "keys_masked":
                     {s: keys_mod.mask(k) for s, k in cur.items()}}
             if body.get("check"):
-                ok, msg = providers.ping(svc, value)
-                resp["check"] = {"ok": ok, "message": msg}
+                res = providers.ping(svc, value)
+                resp["check"] = {"ok": res.get("status") == "ok",
+                                 "status": res.get("status"),
+                                 "message": res.get("detail")}
             self._json(resp)
             return
 
@@ -330,6 +369,7 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 self._json({"error": err}, 400)
                 return
+            audit.log(uid, "username_change", username=p["username"])
             self._json({"ok": True, "username": p["username"]})
             return
 
@@ -383,6 +423,7 @@ class Handler(BaseHTTPRequestHandler):
                             pass
             data = buf.getvalue()
             fname = "monica-export-" + time.strftime("%Y%m%d-%H%M") + ".zip"
+            audit.log(uid, "export")
             self.send_response(200)
             self.send_header("Content-Type", "application/zip")
             self.send_header("Content-Disposition", "attachment; filename=" + fname)
@@ -409,12 +450,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/profile/password":
             # Фаза 5-D: смена пароля — старый обязателен, все сессии инвалидируются
             if not auth.verify_password(uid, body.get("old_password") or ""):
+                audit.log(uid, "password_change", ok=False, error="wrong_password")
                 self._json({"error": "текущий пароль неверен"}, 403)
                 return
             p, err = auth.change_password(uid, body.get("new_password") or "")
             if err:
                 self._json({"error": err}, 400)
                 return
+            audit.log(uid, "password_change", ok=True)
             self._json({"ok": True, "relogin": True})
             return
 
@@ -428,13 +471,18 @@ class Handler(BaseHTTPRequestHandler):
             if not user_keys.get(svc):
                 self._json({"error": "ключ не задан"}, 400)
                 return
-            ok, msg = providers.ping(svc, user_keys[svc])
-            # 6-N: статус проверки сохраняется в профиле (для цветных индикаторов)
+            res = providers.ping(svc, user_keys[svc])
+            ok = res.get("status") == "ok"
+            # Фаза A: keys_status хранит {status, checked_at} (расширенные состояния)
             p = auth.load_profile(uid)
             st = p.setdefault("keys_status", {})
-            st[svc] = {"ok": bool(ok), "ts": time.strftime("%Y-%m-%d %H:%M")}
+            st[svc] = {"status": res.get("status"), "ok": ok,
+                       "message": res.get("detail"),
+                       "checked_at": time.strftime("%Y-%m-%d %H:%M")}
             auth.save_profile(uid, p)
-            self._json({"ok": ok, "message": msg})
+            audit.log(uid, "key_check", service=svc, status=res.get("status"))
+            self._json({"ok": ok, "status": res.get("status"),
+                        "message": res.get("detail")})
             return
 
         if path == "/api/chat":
@@ -463,9 +511,18 @@ class Handler(BaseHTTPRequestHandler):
             pi = str(body.get("project_instruction") or "")[:500].strip()
             if pi:
                 messages[0]["content"] += "\n\nКонтекст проекта пользователя: " + pi
+            # Фаза A: бюджет — резерв до запроса, commit по фактическому usage
+            est = max(1000, sum(len(m["content"]) for m in messages
+                                if isinstance(m.get("content"), str)) // 2)
+            if not budget.reserve(uid, est, kind="light"):
+                self._json({"error": "дневной лимит токенов исчерпан, сброс в полночь",
+                            "budget": budget.status(uid)}, 429)
+                return
             try:
-                reply = providers.chat(service, user_keys[service], api_mdl, messages)
+                reply, usage = providers.chat(service, user_keys[service], api_mdl,
+                                              messages, with_usage=True)
             except Exception as e:
+                budget.release(uid, est)
                 self._json({"error": "модель недоступна: " + str(e)}, 502)
                 return
             if config.CFG.get("mock_llm"):
@@ -474,6 +531,10 @@ class Handler(BaseHTTPRequestHandler):
                     reply = json.loads(reply).get("reply", reply)
                 except Exception:
                     pass
+            total = (usage or {}).get("total_tokens") if isinstance(usage, dict) else None
+            if not total:
+                total = max(1, len(str(reply)) // 4)
+            budget.commit(uid, total, kind="light", est=est)
             self._json({"reply": reply, "model": api_mdl, "media_notes": media_notes})
             return
 
@@ -502,16 +563,30 @@ class Handler(BaseHTTPRequestHandler):
             pi = str(body.get("project_instruction") or "")[:500].strip()
             if pi:
                 messages[0]["content"] += "\n\nКонтекст проекта пользователя: " + pi
+            # Фаза A: бюджет — резерв до запроса (429 до старта стрима)
+            est = max(1000, sum(len(m["content"]) for m in messages
+                                if isinstance(m.get("content"), str)) // 2)
+            if not budget.reserve(uid, est, kind="light"):
+                self._json({"error": "дневной лимит токенов исчерпан, сброс в полночь",
+                            "budget": budget.status(uid)}, 429)
+                return
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
+            usage_out = {}
+            sent = 0
             try:
-                for delta in providers.chat_stream(service, user_keys[service], api_mdl, messages):
+                for delta in providers.chat_stream(service, user_keys[service], api_mdl,
+                                                   messages, usage_out=usage_out):
                     if delta:
+                        sent += len(delta)
                         self.wfile.write(delta.encode("utf-8"))
                         self.wfile.flush()
+                total = usage_out.get("total_tokens") or max(1, sent // 4)
+                budget.commit(uid, total, kind="light", est=est)
             except Exception as e:
+                budget.release(uid, est)
                 try:
                     self.wfile.write(("\n\n⚠️ модель прервалась: " + str(e)).encode("utf-8"))
                     self.wfile.flush()
@@ -532,11 +607,23 @@ class Handler(BaseHTTPRequestHandler):
             vault = os.path.join(auth.user_dir(uid), "vault")
             messages = [{"role": "system", "content": term.system_prompt(vault)},
                         {"role": "user", "content": text[:4000]}]
+            # Фаза A: терминал тоже расходует бюджет (smart-модель)
+            est = max(1000, len(text) // 2)
+            if not budget.reserve(uid, est, kind="smart"):
+                self._json({"error": "дневной лимит токенов исчерпан, сброс в полночь",
+                            "budget": budget.status(uid)}, 429)
+                return
             try:
-                raw = providers.chat(svc, user_keys[svc], api_mdl, messages)
+                raw, usage = providers.chat(svc, user_keys[svc], api_mdl,
+                                            messages, with_usage=True)
             except Exception as e:
+                budget.release(uid, est)
                 self._json({"error": "модель недоступна: " + str(e)}, 502)
                 return
+            total = (usage or {}).get("total_tokens") if isinstance(usage, dict) else None
+            if not total:
+                total = max(1, len(str(raw)) // 4)
+            budget.commit(uid, total, kind="smart", est=est)
             reply, ops = term.parse_model_reply(raw)
             clean, errs = term.validate_ops(vault, ops)
             for e in errs:
@@ -560,6 +647,7 @@ class Handler(BaseHTTPRequestHandler):
                 hist.record(hp, rec)
                 if rec.get("op") == "create_note":
                     mon_mods.enqueue(auth.user_dir(uid), rec["path"])
+            audit.log(uid, "vault_write", count=len(clean))
             self._json({"results": results})
             return
 
@@ -588,6 +676,7 @@ class Handler(BaseHTTPRequestHandler):
                 lines += ["", who + ": " + str(m.get("content"))[:4000]]
             with open(full, "w", encoding="utf-8", newline="\n") as f:
                 f.write(("\n".join(lines))[:100_000])
+            audit.log(uid, "session_archive", path=rel)
             self._json({"ok": True, "path": rel})
             return
 
@@ -628,6 +717,7 @@ class Handler(BaseHTTPRequestHandler):
                 os.makedirs(os.path.dirname(full), exist_ok=True)
             with open(full, "w", encoding="utf-8", newline="\n") as f:
                 f.write(content)
+            audit.log(uid, "vault_write", path=rel)
             hp = os.path.join(auth.user_dir(uid), "history.jsonl")
             rec = hist.record(hp, {"op": "edit_note" if prev is not None else "create_note",
                                    "path": rel, "prev": prev})
@@ -645,6 +735,7 @@ class Handler(BaseHTTPRequestHandler):
             vault = os.path.join(auth.user_dir(uid), "vault")
             hp = os.path.join(auth.user_dir(uid), "history.jsonl")
             ok, msg = hist.undo(vault, hp, body.get("id"))
+            audit.log(uid, "vault_undo", ok=ok)
             self._json({"ok": ok, "message": msg}, 200 if ok else 400)
             return
 
@@ -768,6 +859,35 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         self._json({"error": "неизвестный маршрут"}, 404)
+
+
+    # ── PUT ──
+
+    def do_PUT(self):
+        # Фаза A: смена дневного лимита токенов (валидация 1000..10 000 000)
+        path = urllib.parse.urlparse(self.path).path
+        if path != "/api/budget":
+            self.send_error(404)
+            return
+        body = self._body()
+        if body is None:
+            self._json({"error": "пустой или слишком большой запрос"}, 400)
+            return
+        uid = self._uid()
+        if not uid:
+            self._json({"error": "нужен вход"}, 401)
+            return
+        try:
+            limit = int(body.get("limit"))
+        except (TypeError, ValueError):
+            self._json({"error": "limit должен быть числом"}, 400)
+            return
+        if not 1000 <= limit <= 10_000_000:
+            self._json({"error": "лимит должен быть от 1000 до 10 000 000"}, 400)
+            return
+        budget.set_limit(uid, limit)
+        audit.log(uid, "budget_change", limit=limit)
+        self._json({"ok": True, "budget": budget.status(uid)})
 
 
 def hmac_guard(password):
