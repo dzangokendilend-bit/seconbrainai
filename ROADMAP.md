@@ -18,7 +18,8 @@
 - **Личная Википедия** — автогенерируемые статьи по заметкам в стиле Иванопедии
   (серифные заголовки, инфобоксы), анимация открытия вкладки.
 - **Модули**: Википедия (поиск/выжимки), Telegram-бот (Luna, per-user токен),
-  Полная аналитика (выключена по умолчанию, гейт по паролю `4221`, этические ограничения).
+  Полная аналитика (выключена по умолчанию, re-auth паролем аккаунта → токен 15 мин,
+  этические ограничения).
 - **Настройки** в трёх секциях: Профиль (юзернейм/аватар/пароль),
   Модели и ключи (шифрованные, с проверкой живости), Модули.
 
@@ -32,7 +33,8 @@
 
 ## 2. Где мы сейчас
 
-(этот коммит) Фаза A «Фундамент безопасности и бюджетов»: app/budget.py (дневной лимит 200k, атомарный reserve через lock-файл, разбивка light/smart, сброс в полночь), app/audit.py (append-only audit.jsonl с маскированием), rate limits (login 10/мин на IP, chat/terminal 30/мин на uid), providers.ping() → ok/quota/permissions/unavailable/invalid/network, UI «Лимиты и использование» в настройках, smoke 80/80 ← HEAD
+(этот коммит) Фаза B «Импорт vault 2.0, Heatmap активности и Re-auth gate»: app/importer.py (ZIP-мастер: preview, стратегии конфликтов overwrite/skip/copy «имя (1).md», SHA-256-дедуп через import_manifest.json — повторный импорт даёт 0 изменений, .obsidian игнорируется, контент байт-в-байт, защиты path traversal + ZIP-bomb: ≤200МБ/≤5000 файлов/≤20МБ, фоновая задача с прогрессом, маршруты /api/import/preview|run|status|report), app/analytics.py (heatmap за 365 дней: history.jsonl + mtime vault + activity.jsonl; чаты/импорты пишутся в activity.jsonl), re-auth gate (4221/ANALYTICS_PASSWORD/hmac_guard удалены полностью; POST /api/analytics/reauth → secrets.token_urlsafe, TTL 15 мин, X-Analytics-Token на всех /api/analytics/*), UI: мастер импорта ZIP в tabAna, heatmap-сетка 53×7 с tooltips и переключателем метрик, форма «пароль аккаунта», smoke 93/93 ← HEAD
+Фаза A «Фундамент безопасности и бюджетов»: app/budget.py (дневной лимит 200k, атомарный reserve через lock-файл, разбивка light/smart, сброс в полночь), app/audit.py (append-only audit.jsonl с маскированием), rate limits (login 10/мин на IP, chat/terminal 30/мин на uid), providers.ping() → ok/quota/permissions/unavailable/invalid/network, UI «Лимиты и использование» в настройках, smoke 80/80
 Phase 8-prep: деплой-инструменты — tools/backup.py (zip data/ + ротация), HTTPS-опция в server.py (ssl в config.json), автозапуск (start_monica.bat + install_autostart.bat)
 f768811 fix round 6: переключатель моделей в чате = роли «⚡ Лёгкая / 🧠 Сложная» (/api/prefs/kind, resolve_model учитывает chat_kind); вкладки настроек скроллятся с контентом
 5aa4a75 Phase 7 prep: tools/import_vault.py + tools/cleanup_users.py; 6-F закрыта
@@ -60,7 +62,8 @@ e4d33e9 fix: клики по бета-баннеру (pointer-events)
 Готово: каркас пользователей, онбординг 2.0 («Ритуал запуска» + «Живое ядро»), чат
 со стримингом и медиа-вложениями, Терминал 2.1, вики 1:1, проекты сессий,
 настройки ×3 (glassmorphism), роли моделей в чате, Фаза A (бюджеты, аудит,
-rate limits, состояния ключей), ui_smoke 80/80.
+rate limits, состояния ключей), Фаза B (импорт vault 2.0, heatmap, re-auth gate),
+ui_smoke 93/93.
 `mock_llm: true` — модели пока заглушки (переключает автор при наличии ключей).
 
 ## 3. Дорожная карта

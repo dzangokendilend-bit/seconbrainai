@@ -12,10 +12,12 @@ from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import analytics
 import audit
 import auth
 import budget
 import config
+import importer
 import history as hist
 import keys as keys_mod
 import media
@@ -173,6 +175,38 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json({"ok": True, "events": audit.recent(uid, 100)})
             return
+        if path == "/api/analytics/heatmap":
+            # Фаза B: heatmap активности за 365 дней — требует re-auth токен
+            uid = self._uid()
+            if not uid:
+                self._json({"error": "нужен вход"}, 401)
+                return
+            if not analytics.check_token(uid, self.headers.get("X-Analytics-Token")):
+                self._json({"error": "требуется повторный вход"}, 401)
+                return
+            self._json({"ok": True, "days": analytics.heatmap(uid)})
+            return
+        if path in ("/api/import/status", "/api/import/report"):
+            # Фаза B: прогресс/отчёт фоновой задачи импорта
+            uid = self._uid()
+            if not uid:
+                self._json({"error": "нужен вход"}, 401)
+                return
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            job_id = (q.get("job") or [""])[0]
+            if path == "/api/import/status":
+                job = importer.job_status(job_id)
+                if not job:
+                    self._json({"error": "задача не найдена"}, 404)
+                    return
+                self._json({"ok": True, "job": job})
+            else:
+                rep = importer.job_report(uid, job_id)
+                if not rep:
+                    self._json({"error": "отчёт не найден"}, 404)
+                    return
+                self._json({"ok": True, "report": rep})
+            return
         if path in ("/", "/index.html"):
             self._serve_file("index.html", "text/html; charset=utf-8")
             return
@@ -233,16 +267,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"hint": hint})
             return
 
-        if path == "/api/analytics/check":
-            ok = hmac_guard(body.get("password"))
-            self._json({"ok": ok}, 200 if ok else 403)
-            return
-
         if path == "/api/onboarding/complete":
+            # Фаза B: гейт 4221 удалён — аналитика защищается re-auth своим паролем
             errs, payload = onboarding.validate(body)
-            if payload.get("modules", {}).get("analytics"):
-                if not hmac_guard(body.get("analytics_password")):
-                    errs.append("аналитика: неверный пароль закрытого тестирования")
             if errs:
                 self._json({"error": "; ".join(errs)}, 400)
                 return
@@ -256,9 +283,6 @@ class Handler(BaseHTTPRequestHandler):
                     "completed": True,
                  },
                  "modules": payload.get("modules")})
-            if payload.get("modules", {}).get("analytics"):
-                p["modules"]["analytics_unlocked"] = True
-                auth.save_profile(p["user_id"], p)
             if body.get("avatar"):
                 try:
                     p["avatar"] = auth.save_avatar(p["user_id"], body["avatar"])
@@ -338,12 +362,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "неизвестный модуль"}, 400)
                 return
             enabled = body.get("enabled") is True
-            if mod == "analytics" and enabled:
-                if not p.get("modules", {}).get("analytics_unlocked") and \
-                        not hmac_guard(body.get("password")):
-                    self._json({"error": "нужен пароль закрытого тестирования"}, 403)
-                    return
-                mods["analytics_unlocked"] = True
+            # Фаза B: пароль 4221 удалён — данные аналитики защищает re-auth
             mods[mod] = enabled
             p["modules"] = mods
             auth.save_profile(uid, p)
@@ -485,11 +504,46 @@ class Handler(BaseHTTPRequestHandler):
                         "message": res.get("detail")})
             return
 
+        if path == "/api/analytics/reauth":
+            # Фаза B: повторный вход СВОИМ паролем → токен на 15 минут
+            # (статический пароль 4221 полностью удалён)
+            p = auth.load_profile(uid)
+            ok = auth.verify_login(p["username"], body.get("password") or "")
+            audit.log(uid, "analytics_reauth", ok=bool(ok))
+            if not ok:
+                self._json({"error": "неверный пароль"}, 401)
+                return
+            self._json({"ok": True, "token": analytics.issue_token(uid),
+                        "ttl": analytics.TTL})
+            return
+
+        if path == "/api/import/preview":
+            # Фаза B: preview ZIP-архива без записи (риски 7-8 учтены в importer)
+            try:
+                prev = importer.scan(uid, importer.decode_zip(body.get("zip")))
+            except importer.ImportError as e:
+                self._json({"error": str(e)}, 400)
+                return
+            self._json({"ok": True, "preview": prev})
+            return
+
+        if path == "/api/import/run":
+            # Фаза B: фоновый импорт → {job_id}; прогресс — /api/import/status
+            try:
+                job_id = importer.run(uid, importer.decode_zip(body.get("zip")),
+                                      body.get("strategy") or "skip")
+            except importer.ImportError as e:
+                self._json({"error": str(e)}, 400)
+                return
+            self._json({"ok": True, "job_id": job_id})
+            return
+
         if path == "/api/chat":
             text = (body.get("message") or "").strip()
             if not text:
                 self._json({"error": "пустое сообщение"}, 400)
                 return
+            analytics.track(uid, "chat")  # Фаза B: событие для heatmap
             service, api_mdl = resolve_model(uid, "light")  # 6-O4: лёгкая модель
             user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
             if not user_keys.get(service):
@@ -543,6 +597,7 @@ class Handler(BaseHTTPRequestHandler):
             if not text:
                 self._json({"error": "пустое сообщение"}, 400)
                 return
+            analytics.track(uid, "chat")  # Фаза B: событие для heatmap
             service, api_mdl = resolve_model(uid, "light")  # 6-O4: лёгкая модель
             user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
             if not user_keys.get(service):
@@ -814,6 +869,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "path": "Выжимки/" + title + ".md"})
             return
         if path == "/api/analytics/summary":
+            # Фаза B: как heatmap — только с re-auth токеном (4221 удалён)
+            if not analytics.check_token(uid, self.headers.get("X-Analytics-Token")):
+                self._json({"error": "требуется повторный вход"}, 401)
+                return
             p = auth.load_profile(uid)
             if not p.get("modules", {}).get("analytics"):
                 self._json({"error": "модуль Полная аналитика выключен"}, 403)
@@ -888,11 +947,6 @@ class Handler(BaseHTTPRequestHandler):
         budget.set_limit(uid, limit)
         audit.log(uid, "budget_change", limit=limit)
         self._json({"ok": True, "budget": budget.status(uid)})
-
-
-def hmac_guard(password):
-    import hmac as h
-    return bool(password) and h.compare_digest(str(password), config.ANALYTICS_PASSWORD)
 
 
 class Server(ThreadingHTTPServer):

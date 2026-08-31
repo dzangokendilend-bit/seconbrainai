@@ -13,7 +13,7 @@ def load():
 CFG = load()
 HOST = CFG.get("host", "127.0.0.1")
 PORT = int(CFG.get("port", 8900))
-ANALYTICS_PASSWORD = str(CFG.get("analytics_password", ""))
+# Фаза B: analytics_password (4221) удалён — re-auth своим паролем аккаунта
 MACHINE_SECRET = str(CFG.get("machine_secret", ""))
 SESSION_TTL_HOURS = int(CFG.get("session_ttl_hours", 168))
 _SSL = CFG.get("ssl") or {}

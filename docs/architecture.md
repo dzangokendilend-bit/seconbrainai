@@ -13,7 +13,7 @@
         ▼
 app/server.py  ── ThreadingHTTPServer, маршрутизация, HTTPS-опция
   ├─ auth.py        пользователи, PBKDF2, сессии (data/sessions/sessions.json)
-  ├─ config.py      config.json: host/port, machine_secret, analytics_password, ssl
+  ├─ config.py      config.json: host/port, machine_secret, ssl
   ├─ keys.py        шифрование ключей пользователей машинным секретом
   ├─ providers.py   LLM-провайдеры (glm/smart/luna), chat/chat_stream/ping
   ├─ media.py       Whisper, ffmpeg-кадры, attachments (≤5 × 10МБ)

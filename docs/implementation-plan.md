@@ -52,8 +52,17 @@
 сообщением; audit.jsonl растёт при каждом чувствительном действии; smoke зелёный.
 Зависимости: нет. Риски: атомарность при параллельных запросах → lock-файл.
 
-### Фаза B — «Импорт vault + аналитика + вложения 2.0»
-Состав:
+### Фаза B — «Импорт vault + аналитика + вложения 2.0» ✅
+Реализовано (утверждённый объём): app/importer.py (ZIP-мастер: preview,
+стратегии overwrite/skip/copy, SHA-256-дедуп → import_manifest.json,
+.obsidian игнор, traversal + ZIP-bomb защиты, фоновая задача IMPORT_JOBS
+с прогрессом; jobs.py не понадобился — реестр задач в importer.py),
+app/analytics.py (heatmap 365 дней, activity.jsonl, re-auth токены 15 мин),
+маршруты /api/import/* и /api/analytics/reauth|heatmap, UI в tabAna
+(reauth-форма, heatmap 53×7 с tooltips и метриками, мастер импорта ZIP),
+4221 удалён полностью, smoke 93/93. Слот «заметка из vault» во вложениях —
+не входил в утверждённый объём Фазы B, перенесён.
+Состав (исходный план):
 1. `app/importer.py` + `app/jobs.py`: мастер импорта (папка/ZIP), preview,
    checksum-дедуп, стратегии конфликтов, фоновая идемпотентная задача,
    статус-маршруты; расширение `tools/import_vault.py` → CLI-обёртка над importer.

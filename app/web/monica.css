@@ -805,3 +805,21 @@ button.cs-navitem:hover{background:rgba(255,255,255,.07)}
 .pc-pin{position:absolute;top:8px;right:10px;font-size:12px}
 .spin2{flex:none;display:inline-flex;width:13px;height:13px;color:var(--acc)}
 .spin2 svg{width:100%;height:100%}
+
+/* ── Фаза B: heatmap активности (GitHub-style, палитра .kdot) ── */
+.hm-grid{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,12px);
+  gap:3px;overflow-x:auto;padding:6px 2px}
+.hm-cell{width:12px;height:12px;border-radius:3px;background:rgba(255,255,255,.07)}
+.hm-l1{background:rgba(107,224,138,.25)}
+.hm-l2{background:rgba(107,224,138,.45)}
+.hm-l3{background:rgba(107,224,138,.7)}
+.hm-l4{background:#6be08a;box-shadow:0 0 6px rgba(107,224,138,.7)}
+.hm-legend{display:flex;align-items:center;gap:4px;margin-top:8px;
+  font-size:11px;color:var(--muted)}
+.hm-legend .hm-cell{width:10px;height:10px}
+.hm-metrics{display:flex;gap:6px;margin:8px 0 4px;flex-wrap:wrap}
+.hm-mbtn{padding:4px 12px;border-radius:var(--r-pill);border:1px solid var(--border);
+  background:none;color:var(--muted);font-family:var(--ui);font-size:12px;cursor:pointer;
+  transition:.15s}
+.hm-mbtn:hover{color:var(--text);border-color:rgba(255,255,255,.3)}
+.hm-mbtn.on{background:rgba(143,180,255,.12);color:var(--acc);border-color:rgba(143,180,255,.5)}

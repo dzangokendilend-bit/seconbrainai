@@ -1,7 +1,6 @@
 {
   "host": "127.0.0.1",
   "port": 8900,
-  "analytics_password": "CHANGE_ME",
   "machine_secret": "GENERATE_hex64",
   "session_ttl_hours": 12,
   "mock_llm": true,

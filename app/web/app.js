@@ -4,9 +4,10 @@
 const $ = id => document.getElementById(id);
 const esc = s => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-async function api(path, body, method) {
+async function api(path, body, method, headers) {
   const m = method || "POST";
-  const opts = {method: m, headers: {"Content-Type": "application/json"}};
+  const opts = {method: m, headers: Object.assign(
+    {"Content-Type": "application/json"}, headers || {})};
   if (m !== "GET") opts.body = JSON.stringify(body || {}); // GET не несёт body
   const r = await fetch(path, opts);
   return {status: r.status, data: await r.json().catch(() => ({}))};
@@ -106,7 +107,6 @@ const W = {step: 1, source: "", purpose: "", username: "", language: "ru",
   smart: {provider: "smart", api_model: ""},
   daily_load: 5, avatar: null,
   modules: {wikipedia: true, telegram: false, analytics: false},
-  analytics_unlocked: false, analytics_password: "",
   keys: {glm: "", smart: "", luna: ""}, password: "", hint: ""};
 let CFGM = null;
 /* 6-O4: провайдеры для кастомных моделей + мета языков (флаги) */
@@ -580,14 +580,9 @@ function renderW() {
       '<div id="w-modx"></div>' + wNav();
     wz.querySelectorAll(".cs-sw").forEach(t => t.onclick = async () => {
       const m = t.dataset.m;
-      if (m === "analytics" && !W.modules.analytics) {
-        const pass = prompt("Модуль сырой и может зацеплять данные других людей. Доступ только в рамках закрытого тестирования.\n\nПароль:");
-        if (pass === null) return;
-        const r = await api("/api/analytics/check", {password: pass});
-        if (!r.data.ok) { $("w-modx").innerHTML = '<div class="err">неверный пароль</div>'; return; }
-        W.analytics_unlocked = true; W.analytics_password = pass;
-        $("w-modx").innerHTML = '<div class="warn">Разблокировано. Работаем только с твоими данными.</div>';
-      }
+      /* Фаза B: гейт 4221 удалён — данные аналитики защищает re-auth */
+      if (m === "analytics" && !W.modules.analytics)
+        $("w-modx").innerHTML = '<div class="warn">Аналитика сырая: данные откроются после подтверждения пароля аккаунта во вкладке «Аналитика».</div>';
       W.modules[m] = !W.modules[m];
       t.className = "cs-sw" + (W.modules[m] ? " on" : "");
       /* 6-O3: модуль пристыковывается/отстыковывается на орбите ядра */
@@ -641,7 +636,7 @@ function renderW() {
         survey: {source: W.source, purpose: W.purpose},
         prefs: {language: W.language, model: W.model, daily_load: W.daily_load,
           light: W.light, smart: W.smart},
-        modules: W.modules, analytics_password: W.analytics_password, keys: W.keys});
+        modules: W.modules, keys: W.keys});
       if (r.data.ok) { wDraftClear(); launchFinale(); return null; }
       return r.data.error || "ошибка сохранения";
     });
@@ -1989,12 +1984,62 @@ function tabTg(p) {
   draw();
 }
 
-/* ── Полная аналитика: сводка + бары активности ── */
+/* ── Фаза B: Полная аналитика — re-auth, heatmap, импорт vault ── */
+let ANA_TOKEN = null;   // токен re-auth живёт только в памяти страницы
+let HM_DAYS = null;     // кэш данных heatmap для переключателя метрик
+let HM_METRIC = "all";
+
+const HM_METRICS = [["all", "все"], ["notes", "заметки"], ["chats", "чаты"], ["imports", "импорты"]];
+
+function renderHeatmap(days) {
+  const val = d => HM_METRIC === "all" ? d.notes + d.chats + d.imports : d[HM_METRIC];
+  const max = Math.max(1, ...days.map(val));
+  const lvl = v => v === 0 ? 0 : Math.min(4, 1 + Math.floor((v - 1) / max * 4));
+  const first = new Date(days[0].date + "T00:00:00");
+  const shift = (first.getDay() + 6) % 7; // выравнивание: Пн = первая строка
+  const cells = [];
+  for (let i = 0; i < shift; i++) cells.push('<i class="hm-cell" style="visibility:hidden"></i>');
+  for (const d of days) {
+    const v = val(d);
+    cells.push('<i class="hm-cell hm-l' + lvl(v) + '" title="' + d.date +
+      " — заметки: " + d.notes + " · чаты: " + d.chats + " · импорты: " + d.imports + '"></i>');
+  }
+  return '<div class="hm-grid">' + cells.join("") + '</div>' +
+    '<div class="hm-legend">меньше <i class="hm-cell"></i><i class="hm-cell hm-l1"></i>' +
+    '<i class="hm-cell hm-l2"></i><i class="hm-cell hm-l3"></i><i class="hm-cell hm-l4"></i> больше</div>';
+}
+
 async function tabAna(p) {
+  if (!ANA_TOKEN) {
+    /* Фаза B: вместо пароля 4221 — повторный вход своим паролем аккаунта */
+    $("m-body").innerHTML =
+      '<div class="set-card"><div class="set-h">Полная аналитика</div>' +
+      '<p class="sub" style="padding:0 16px 10px">Аналитика сырая и работает только с твоим vault. Подтверди, что это ты — введи пароль аккаунта (доступ на 15 минут).</p>' +
+      '<input class="minput" type="password" id="ana-pass" placeholder="пароль аккаунта" autocomplete="current-password">' +
+      '<div class="apply-row"><button class="mbtn acc" id="ana-go">Подтвердить</button></div>' +
+      '<div class="err" id="ana-err"></div></div>';
+    const go = async () => {
+      const r = await api("/api/analytics/reauth", {password: $("ana-pass").value});
+      if (r.status === 401 || r.data.error) {
+        $("ana-err").textContent = r.data.error || "неверный пароль";
+        return;
+      }
+      ANA_TOKEN = r.data.token;
+      tabAna(p);
+    };
+    $("ana-go").onclick = go;
+    $("ana-pass").addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+    return;
+  }
   $("m-body").innerHTML = '<p class="sum">считаю…</p>';
-  const r = await api("/api/analytics/summary", {});
+  const H = {"X-Analytics-Token": ANA_TOKEN};
+  const r = await api("/api/analytics/summary", {}, "POST", H);
+  if (r.status === 401) { ANA_TOKEN = null; return tabAna(p); } // токен истёк
   if (r.data.error) { $("m-body").innerHTML = '<p style="color:var(--red)">' + esc(r.data.error) + '</p>'; return; }
   const s = r.data;
+  const hd = await api("/api/analytics/heatmap", null, "GET", H);
+  if (hd.status === 401) { ANA_TOKEN = null; return tabAna(p); }
+  HM_DAYS = hd.data.days || [];
   const days = s.by_day.length || 1;
   const avg = (s.by_day.reduce((a, d) => a + d[1], 0) / days).toFixed(1);
   const max = Math.max(1, ...s.by_day.map(d => d[1]));
@@ -2004,12 +2049,82 @@ async function tabAna(p) {
     '<div class="stat-box"><b>' + s.words + '</b><span>слов всего</span></div>' +
     '<div class="stat-box"><b>' + s.changed_last_7d + '</b><span>изменено за 7 дней</span></div>' +
     '<div class="stat-box"><b>' + avg + '</b><span>заметок в день (среднее)</span></div></div>' +
-    '<h2>Топ тегов</h2><div>' + (s.top_tags.map(t =>
+    '<h2 style="margin-top:20px">Активность за год</h2>' +
+    '<div class="hm-metrics">' + HM_METRICS.map(m =>
+      '<button class="hm-mbtn' + (HM_METRIC === m[0] ? " on" : "") + '" data-m="' + m[0] + '">' + m[1] + '</button>').join("") + '</div>' +
+    '<div id="hm-wrap">' + renderHeatmap(HM_DAYS) + '</div>' +
+    '<h2 style="margin-top:20px">Топ тегов</h2><div>' + (s.top_tags.map(t =>
       '<span class="tagc">' + esc(t[0]) + ' · ' + t[1] + '</span>').join("") || '<span class="sub">тегов нет</span>') + '</div>' +
     '<h2 style="margin-top:20px">Активность по дням</h2>' +
     s.by_day.map(d => '<div class="bar-row"><span class="d">' + d[0] + '</span>' +
       '<span class="bar-track"><span class="bar-fill" style="width:' + (d[1] / max * 100) + '%"></span></span><b>' + d[1] + '</b></div>').join("") +
+    '<div class="set-card" style="margin-top:22px"><div class="set-h">Импорт vault из ZIP (Obsidian)</div>' +
+    '<p class="sub" style="padding:0 16px 10px">Заархивируй папку vault в ZIP — заметки .md и вложения сохранят структуру папок, содержимое не меняется. Папка .obsidian игнорируется. Для импорта папки без ZIP: <code>python tools/import_vault.py</code></p>' +
+    '<input type="file" id="imp-file" accept=".zip">' +
+    '<div id="imp-prev"></div></div>' +
     '<div class="warn" style="margin-top:18px">Аналитика видит только твой vault. Использование для слежки за людьми запрещено — я откажусь и объясню.</div>';
+  $("m-body").querySelectorAll(".hm-mbtn").forEach(b => b.onclick = () => {
+    HM_METRIC = b.dataset.m;
+    $("m-body").querySelectorAll(".hm-mbtn").forEach(x =>
+      x.classList.toggle("on", x === b));
+    $("hm-wrap").innerHTML = renderHeatmap(HM_DAYS);
+  });
+  $("imp-file").onchange = async () => {
+    const f = $("imp-file").files[0];
+    if (!f) return;
+    if (f.size > 17 * 1024 * 1024) {
+      $("imp-prev").innerHTML = '<div class="err">ZIP больше 17МБ — для больших vault используй tools/import_vault.py (папка напрямую)</div>';
+      return;
+    }
+    $("imp-prev").innerHTML = '<p class="sum">анализирую архив…</p>';
+    const b64 = await new Promise(res => {
+      const rd = new FileReader();
+      rd.onload = () => res(rd.result.split(",", 2)[1]);
+      rd.readAsDataURL(f);
+    });
+    const pr = await api("/api/import/preview", {zip: b64});
+    if (pr.data.error) { $("imp-prev").innerHTML = '<div class="err">' + esc(pr.data.error) + '</div>'; return; }
+    const pv = pr.data.preview;
+    $("imp-prev").innerHTML =
+      '<div class="sum">заметок: <b>' + pv.notes + '</b> · вложений: <b>' + pv.attachments +
+      '</b> · размер: <b>' + (pv.total_size / 1024).toFixed(0) + ' КБ</b>' +
+      (pv.conflicts.length ? ' · <span style="color:var(--red)">конфликтов: ' + pv.conflicts.length + '</span>' : '') + '</div>' +
+      (pv.warnings.length ? '<div class="warn">' + pv.warnings.map(esc).join("<br>") + '</div>' : "") +
+      '<label>Если файл уже существует:</label>' +
+      '<select class="minput" id="imp-strat">' +
+      '<option value="skip">пропустить существующие</option>' +
+      '<option value="overwrite">перезаписать</option>' +
+      '<option value="copy">сохранить копию «имя (1).md»</option></select>' +
+      '<div class="apply-row"><button class="mbtn acc" id="imp-go">Импортировать</button></div>' +
+      '<div class="mbar" id="imp-bar" style="display:none"><i></i></div><div class="sum" id="imp-stat"></div>';
+    $("imp-go").onclick = async () => {
+      $("imp-go").disabled = true;
+      const rr = await api("/api/import/run", {zip: b64, strategy: $("imp-strat").value});
+      if (rr.data.error) { $("imp-stat").textContent = rr.data.error; return; }
+      pollImport(rr.data.job_id);
+    };
+  };
+}
+
+async function pollImport(job) {
+  $("imp-bar").style.display = "";
+  const t = setInterval(async () => {
+    const r = await api("/api/import/status?job=" + encodeURIComponent(job), null, "GET");
+    const j = r.data.job;
+    if (!j) { clearInterval(t); $("imp-stat").textContent = "задача не найдена"; return; }
+    $("imp-bar").firstElementChild.style.width = j.progress + "%";
+    $("imp-stat").textContent = "обработано " + j.processed + " из " + j.total;
+    if (j.status !== "running") {
+      clearInterval(t);
+      const rep = (await api("/api/import/report?job=" + encodeURIComponent(job), null, "GET")).data.report;
+      $("imp-stat").innerHTML = rep ?
+        ("Готово: добавлено <b>" + rep.added + "</b> · дубликаты: " + rep.skipped_dupes +
+         " · пропущено: " + rep.skipped + " · перезаписано: " + rep.overwritten +
+         " · копий: " + rep.renamed +
+         (rep.errors.length ? ' · <span style="color:var(--red)">ошибок: ' + rep.errors.length + '</span>' : "")) :
+        "готово";
+    }
+  }, 500);
 }
 
 /* ── настройки ×3: Профиль / Модели и ключи / Модули (Фаза 5-D) ── */
@@ -2295,15 +2410,11 @@ function setTabModules(p) {
     Object.keys(modName).map(k =>
       '<button class="cs-menu-row" data-m="' + k + '">' + modName[k] +
       '<span class="cs-sw' + (mods[k] ? " on" : "") + '"></span></button>').join("") +
-    '<div class="cs-menu-note">Аналитика сырая: включается паролем закрытого тестирования, работает только с твоим vault.</div></div>';
+    '<div class="cs-menu-note">Аналитика сырая: работает только с твоим vault, данные открываются после подтверждения пароля аккаунта во вкладке «Аналитика».</div></div>';
   $("s-body").querySelectorAll(".cs-menu-row[data-m]").forEach(row => row.onclick = async () => {
     const m = row.dataset.m;
-    let pass = null;
-    if (m === "analytics" && !mods.analytics_unlocked && !mods[m]) {
-      pass = prompt("Аналитика сырая и может зацеплять данные других людей. Пароль закрытого тестирования:");
-      if (pass === null) return;
-    }
-    const r = await api("/api/modules", {module: m, enabled: !mods[m], password: pass});
+    /* Фаза B: гейт 4221 удалён — данные аналитики защищает re-auth */
+    const r = await api("/api/modules", {module: m, enabled: !mods[m]});
     if (r.data.error) return setFail(r.data.error);
     p.modules = r.data.modules;
     tabSet(p);

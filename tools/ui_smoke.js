@@ -208,7 +208,19 @@ const consoleErrors = [], badResponses = [];
   ok("6-S: проекты — панель и кнопка создания",
     (await page.$("#cs-proj")) && (await page.$("#proj-new")));
   await tab("tg", "#tg-body", "статус бота");
-  await tab("ana", ".stat-grid", "сводка аналитики");
+  /* Фаза B: аналитика за re-auth gate — сначала форма, потом сводка */
+  await tab("ana", "#ana-pass", "форма re-auth аналитики");
+  ok("Фаза B: в UI нет пароля 4221 (поле «пароль аккаунта»)",
+    await page.$eval("#ana-pass", el => el.placeholder.indexOf("аккаунта") >= 0).catch(() => false));
+  await page.click("#ana-pass");
+  await page.type("#ana-pass", PASS);
+  await page.click("#ana-go");
+  await page.waitForSelector(".stat-grid", {timeout: 6000}).catch(() => {});
+  ok("аналитика: после re-auth видна сводка", await page.$(".stat-grid"));
+  ok("Фаза B: heatmap-сетка за год отрисована", await page.$(".hm-grid"));
+  ok("Фаза B: переключатель метрик heatmap (4 кнопки)",
+    (await page.$$(".hm-metrics .hm-mbtn")).length === 4);
+  ok("Фаза B: мастер импорта ZIP в tabAna", await page.$("#imp-file"));
   await tab("set", ".set-tab.on", "вкладки настроек");
   const setTabs = await page.$$eval(".set-tab", els => els.length).catch(() => 0);
   ok("настройки: 3 вкладки — Профиль/Модели и ключи/Модули (факт " + setTabs + ")", setTabs === 3);
@@ -266,6 +278,90 @@ const consoleErrors = [], badResponses = [];
   const menuItems = await page.$$eval("#mdl-menu button", els => els.length).catch(() => 0);
   ok("чат: меню ролей открылось, пунктов (факт " + menuItems + ")", menuItems === 2);
   await page.screenshot({path: path.join(__dirname, "ui_last.png")});
+
+  /* ── Фаза B: импорт vault + re-auth gate (API-проверки вне страницы,
+        чтобы 4xx не попадали в badResponses) ── */
+  const {execSync} = require("child_process");
+  const ck = (await page.cookies()).map(c => c.name + "=" + c.value).join("; ");
+  async function apiRaw(p, opts = {}) {
+    const init = {method: opts.method || "GET",
+      headers: Object.assign({"Cookie": ck, "Content-Type": "application/json"},
+                             opts.headers || {})};
+    if (opts.body !== undefined) init.body = opts.body;
+    const r = await fetch(BASE + p, init);
+    return {status: r.status, data: await r.json().catch(() => ({}))};
+  }
+  /* тестовый ZIP: 2 .md в подпапке + 1 png + .obsidian/config.json (в tmp/) */
+  const tmpDir = path.join(__dirname, "..", "tmp");
+  fs.mkdirSync(tmpDir, {recursive: true});
+  const tag = String(Date.now() % 1000000);
+  const mkPy = path.join(tmpDir, "mkzip.py");
+  fs.writeFileSync(mkPy, [
+    "import zipfile, io, sys",
+    "tag = sys.argv[1]",
+    "buf = io.BytesIO()",
+    "z = zipfile.ZipFile(buf, 'w')",
+    "z.writestr('imp-' + tag + '/sub/note-a.md', '---\\ntitle: A\\n---\\n\\n# A\\n')",
+    "z.writestr('imp-' + tag + '/note-b.md', '# B\\n')",
+    "z.writestr('imp-' + tag + '/img/pic.png', b'\\x89PNG\\r\\n\\x1a\\n' + b'0' * 64)",
+    "z.writestr('imp-' + tag + '/.obsidian/config.json', '{}')",
+    "z.close()",
+    "open(sys.argv[2], 'wb').write(buf.getvalue())"].join("\n"));
+  const zipPath = path.join(tmpDir, "test_vault.zip");
+  execSync('python "' + mkPy + '" ' + tag + ' "' + zipPath + '"');
+  const zipB64 = fs.readFileSync(zipPath).toString("base64");
+  const waitJob = async (job) => {
+    let st = null;
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 250));
+      st = await apiRaw("/api/import/status?job=" + job);
+      if (st.data.job && st.data.job.status !== "running") break;
+    }
+    return st;
+  };
+  const pv = await apiRaw("/api/import/preview", {method: "POST",
+    body: JSON.stringify({zip: zipB64})});
+  ok("Фаза B: preview → notes=2, attachments=1, .obsidian не в счёте",
+    pv.status === 200 && pv.data.preview && pv.data.preview.notes === 2 &&
+    pv.data.preview.attachments === 1);
+  const run1 = await apiRaw("/api/import/run", {method: "POST",
+    body: JSON.stringify({zip: zipB64, strategy: "skip"})});
+  const st1 = run1.data.job_id ? await waitJob(run1.data.job_id) : null;
+  const rep1 = run1.data.job_id ?
+    (await apiRaw("/api/import/report?job=" + run1.data.job_id)).data.report : null;
+  ok("Фаза B: run(skip) → 3 файла импортировано (added=3)",
+    !!st1 && st1.data.job.status === "done" && rep1 && rep1.added === 3);
+  const tree = (await apiRaw("/api/vault/tree", {method: "POST", body: "{}"})).data.tree || [];
+  ok("Фаза B: файлы появились в vault со структурой папок",
+    tree.some(p => p.startsWith("imp-" + tag + "/")));
+  const run2 = await apiRaw("/api/import/run", {method: "POST",
+    body: JSON.stringify({zip: zipB64, strategy: "overwrite"})});
+  const st2 = run2.data.job_id ? await waitJob(run2.data.job_id) : null;
+  const rep2 = run2.data.job_id ?
+    (await apiRaw("/api/import/report?job=" + run2.data.job_id)).data.report : null;
+  ok("Фаза B: повторный run → 0 изменений (checksum-дедуп)",
+    !!st2 && st2.data.job.status === "done" && rep2 &&
+    rep2.added === 0 && rep2.skipped_dupes === 3);
+  const broken = Buffer.from(zipB64, "base64").slice(0, 100).toString("base64");
+  const bp = await apiRaw("/api/import/preview", {method: "POST",
+    body: JSON.stringify({zip: broken})});
+  const health = await fetch(BASE + "/health").then(r => r.status);
+  ok("Фаза B: битый ZIP → 400, сервер не упал",
+    bp.status === 400 && health === 200);
+  const reBad = await apiRaw("/api/analytics/reauth", {method: "POST",
+    body: JSON.stringify({password: "wrong-pass"})});
+  ok("Фаза B: reauth с неверным паролем → 401", reBad.status === 401);
+  const reOk = await apiRaw("/api/analytics/reauth", {method: "POST",
+    body: JSON.stringify({password: PASS})});
+  const hm = await apiRaw("/api/analytics/heatmap",
+    {headers: {"X-Analytics-Token": (reOk.data || {}).token || ""}});
+  ok("Фаза B: reauth → токен, heatmap отдаёт 365 дней",
+    reOk.status === 200 && !!reOk.data.token && hm.status === 200 &&
+    Array.isArray(hm.data.days) && hm.data.days.length === 365 &&
+    typeof hm.data.days[364].notes === "number");
+  const hmNoTok = await apiRaw("/api/analytics/heatmap");
+  ok("Фаза B: heatmap без токена → 401 «требуется повторный вход»",
+    hmNoTok.status === 401 && /повторный вход/.test(hmNoTok.data.error || ""));
 
   ok("нет ошибок JS в консоли", consoleErrors.length === 0);
   ok("нет ответов 4xx/5xx", badResponses.length === 0);
