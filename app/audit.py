@@ -13,7 +13,9 @@ import auth
 # ключи detail, безопасные для записи в журнал
 _SAFE_KEYS = {"service", "ok", "status", "path", "limit", "kind",
               "username", "error", "count", "prefix", "length",
-              "skipped", "strategy"}
+              "skipped", "strategy",
+              # Фаза C: digest/trash
+              "enabled", "date", "processed", "tokens", "trigger"}
 
 _MAX_LINE = 4000  # jsonl-строки <4KB — достаточно для простого append
 

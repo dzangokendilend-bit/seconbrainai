@@ -216,13 +216,18 @@ def generate_article(vault, note_rel, api_key):
     with open(full, encoding="utf-8", errors="replace") as f:
         src = f.read()[:8000]
     title = re.sub(r"\.md$", "", os.path.basename(note_rel))
+    import terminal as term
     messages = [
         {"role": "system",
          "content": ("Ты — генератор статей личной энциклопедии (в стиле Иванопедии). "
                      "По заметке пользователя напиши краткую энциклопедическую статью: "
                      "2-4 абзаца без markdown-заголовков первого уровня, нейтральный тон, "
-                     "только факты из заметки, ничего не выдумывай.")},
-        {"role": "user", "content": "Заметка «" + title + "»:\n\n" + src}]
+                     "только факты из заметки, ничего не выдумывай. "
+                     + term.HARDENING_LINE)},
+        # Фаза C: содержимое заметки — данные, не инструкции (threat model §4)
+        {"role": "user",
+         "content": "Заметка «" + title + "»:\n\n" +
+                    term.wrap_data("содержимое заметки " + title, src)}]
     text = providers.chat("smart", api_key, None, messages).strip()
     # mock-провайдер возвращает JSON {reply, ops} — берём только текст
     if text.startswith("{"):
@@ -304,14 +309,18 @@ def generate_topic_article(vault, topic, note_titles, api_key=None):
         try:
             import providers
             if not (getattr(providers.config, "CFG", {}) or {}).get("mock_llm"):
+                import terminal as term
                 messages = [
                     {"role": "system",
                      "content": ("Ты — генератор статей личной энциклопедии. "
                                  "Напиши 1 вводный абзац для сводной статьи по теме, "
-                                 "нейтрально, только по списку заметок, без выдумок.")},
+                                 "нейтрально, только по списку заметок, без выдумок. "
+                                 + term.HARDENING_LINE)},
+                    # Фаза C: список заметок — данные, не инструкции
                     {"role": "user",
                      "content": "Тема: «" + topic + "». Заметки: " +
-                                ", ".join(note_titles)}]
+                                term.wrap_data("список заметок пользователя по теме",
+                                               ", ".join(note_titles))}]
                 lead = providers.chat("smart", api_key, None, messages).strip()
                 if lead.startswith("{"):
                     try:

@@ -1402,7 +1402,8 @@ function tabTerm(p) {
   $("m-body").innerHTML =
     '<div class="tgrid">' +
     '<div class="tpane tpane-tree" id="ttree-pane"><div class="cs-menu-h">vault' +
-    '<button type="button" class="tt-new" id="tt-new" title="создать">＋</button></div>' +
+    '<span class="tt-btns"><button type="button" class="tt-new" id="tt-trash" title="корзина">🗑</button>' +
+    '<button type="button" class="tt-new" id="tt-new" title="создать">＋</button></span></div>' +
     '<div id="ttree" class="ttree"></div>' +
     '<div class="tt-hint">перетащи файлы сюда — они попадут в vault</div></div>' +
     '<div class="tpane tpane-mid">' +
@@ -1543,6 +1544,34 @@ function tabTerm(p) {
       if (a) newItemModal(a);
     };
     setTimeout(() => document.addEventListener("click", closeTreeMenu, {once: true}), 0);
+  };
+  /* Фаза C: корзина — soft delete с восстановлением (TTL 30 дней) */
+  $("tt-trash").onclick = async e => {
+    e.stopPropagation();
+    closeTreeMenu();
+    const r = await api("/api/vault/trash", {}, "GET");
+    const items = r.data.items || [];
+    const ov = document.createElement("div");
+    ov.className = "modal-ov";
+    ov.innerHTML = '<div class="modal"><h3>Корзина</h3>' +
+      '<div class="sub">Удалённые файлы хранятся 30 дней, затем стираются безвозвратно.</div>' +
+      '<div id="trash-list">' + (items.length ? items.map(i =>
+        '<div class="cs-menu-row"><span>' + esc(i.orig_path) +
+        ' <span class="sub">' + esc(i.deleted_at || "") + "</span></span>" +
+        '<button class="cs-act" data-rid="' + esc(i.id) + '">Восстановить</button></div>').join("")
+        : '<div class="sub">корзина пуста</div>') + "</div>" +
+      '<div class="row"><button class="mbtn" id="tr-close">Закрыть</button></div></div>';
+    document.body.appendChild(ov);
+    ov.querySelector("#tr-close").onclick = () => ov.remove();
+    ov.onclick = ev => { if (ev.target === ov) ov.remove(); };
+    ov.querySelectorAll("[data-rid]").forEach(b => b.onclick = async () => {
+      const rr = await api("/api/vault/trash/restore", {id: b.dataset.rid});
+      if (rr.data.error) { b.textContent = "⚠️ " + rr.data.error; return; }
+      b.textContent = "восстановлено";
+      b.disabled = true;
+      drawTree();
+      drawHist();
+    });
   };
   /* 6-I: drag&drop файлов в дерево */
   const pane = $("ttree-pane");
@@ -2664,12 +2693,30 @@ function setTabKeys(p) {
 function setTabModules(p) {
   const mods = p.modules;
   const modName = {wikipedia: "Википедия", telegram: "Telegram-бот", analytics: "Полная аналитика"};
+  /* Фаза C: настройки ночного digest — prefs.digest_enabled/digest_time */
+  const prefs = (p.onboarding || {}).prefs || {};
+  const dgOn = !!prefs.digest_enabled;
+  const dgTime = prefs.digest_time || "03:00";
   $("s-body").innerHTML =
     '<div class="cs-menu"><div class="cs-menu-h">Модули</div>' +
     Object.keys(modName).map(k =>
       '<button class="cs-menu-row" data-m="' + k + '">' + modName[k] +
       '<span class="cs-sw' + (mods[k] ? " on" : "") + '"></span></button>').join("") +
-    '<div class="cs-menu-note">Аналитика сырая: работает только с твоим vault, данные открываются после подтверждения пароля аккаунта во вкладке «Аналитика».</div></div>';
+    '<div class="cs-menu-note">Аналитика сырая: работает только с твоим vault, данные открываются после подтверждения пароля аккаунта во вкладке «Аналитика».</div></div>' +
+    '<div class="cs-menu"><div class="cs-menu-h">Ночной digest</div>' +
+    '<div style="padding:8px 12px 12px">' +
+    '<button class="cs-menu-row" id="dg-toggle"><span>Включён</span>' +
+    '<span class="cs-sw' + (dgOn ? " on" : "") + '" id="dg-sw"></span></button>' +
+    '<div class="mrow" style="padding:8px 0"><label style="margin:0">Время</label>' +
+    '<input class="minput" type="time" id="dg-time" value="' + esc(dgTime) + '" style="margin:0;width:auto">' +
+    '<button class="cs-act primary" id="dg-save">Сохранить</button></div>' +
+    '<div class="mrow" style="padding:0 0 10px">' +
+    '<button class="cs-act" id="dg-run">Запустить сейчас</button>' +
+    '<input class="minput" type="date" id="dg-bf-date" style="margin:0;width:auto" title="дата для дозапуска">' +
+    '<button class="cs-act" id="dg-backfill">Дозапустить дату</button></div>' +
+    '<div class="sub" style="margin:0 0 6px">Каждый день в указанное время Моника собирает изменения заметок и чатов за сутки в заметку Digests/<дата>.md — исходные заметки не трогаются. История запусков:</div>' +
+    '<div id="dg-jobs" class="dg-jobs"><div class="sub">загрузка…</div></div>' +
+    '</div></div>';
   $("s-body").querySelectorAll(".cs-menu-row[data-m]").forEach(row => row.onclick = async () => {
     const m = row.dataset.m;
     /* Фаза B: гейт 4221 удалён — данные аналитики защищает re-auth */
@@ -2678,6 +2725,54 @@ function setTabModules(p) {
     p.modules = r.data.modules;
     tabSet(p);
   });
+  /* Фаза C: переключатель digest */
+  $("dg-toggle").onclick = async () => {
+    const r = await api("/api/prefs/digest", {enabled: !dgOn});
+    if (r.data.error) return setFail(r.data.error);
+    ME.onboarding.prefs.digest_enabled = r.data.digest_enabled;
+    setOk(r.data.digest_enabled ? "ночной digest включён" : "ночной digest выключен");
+    tabSet(ME);
+  };
+  $("dg-save").onclick = async () => {
+    const t = $("dg-time").value;
+    const r = await api("/api/prefs/digest", {enabled: dgOn, time: t});
+    if (r.data.error) return setFail(r.data.error);
+    ME.onboarding.prefs.digest_time = r.data.digest_time;
+    setOk("время digest сохранено: " + r.data.digest_time);
+  };
+  const drawJobs = async () => {
+    const r = await api("/api/jobs", {}, "GET");
+    const items = r.data.jobs || [];
+    const box = $("dg-jobs");
+    if (!box) return;
+    box.innerHTML = items.length ? items.map(j =>
+      '<div class="dg-row"><span class="dg-date">' + esc(j.date || "") + '</span>' +
+      '<span class="dg-st ' + esc(j.status) + '">' + esc(j.status) + '</span>' +
+      '<span class="sub">' + esc(j.duration_s !== undefined ? j.duration_s + "с" : "—") +
+      ' · обработано: ' + (j.processed !== undefined ? j.processed : "—") +
+      ' · токены: ' + (j.tokens !== undefined ? j.tokens : "—") + '</span>' +
+      (j.error ? '<span class="dg-err">' + esc(j.error) + "</span>" : "") +
+      "</div>").join("") : '<div class="sub">запусков пока не было</div>';
+  };
+  drawJobs();
+  $("dg-run").onclick = async () => {
+    $("dg-run").disabled = true;
+    const r = await api("/api/jobs/digest/run", {});
+    $("dg-run").disabled = false;
+    if (r.data.error) return setFail("digest: " + r.data.error);
+    setOk(r.data.skipped ? "digest за эту дату уже готов" :
+      "digest готов: " + (r.data.path || "") + " (событий: " + r.data.processed + ")");
+    drawJobs();
+  };
+  $("dg-backfill").onclick = async () => {
+    const d = $("dg-bf-date").value;
+    if (!d) return setFail("укажи дату для дозапуска");
+    const r = await api("/api/jobs/digest/backfill", {date: d});
+    if (r.data.error) return setFail("backfill: " + r.data.error);
+    setOk(r.data.skipped ? "digest за " + d + " уже готов" :
+      "backfill готов: " + (r.data.path || d));
+    drawJobs();
+  };
 }
 
 /* ── загрузка ── */

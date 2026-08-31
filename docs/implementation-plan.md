@@ -75,14 +75,28 @@ app/analytics.py (heatmap 365 дней, activity.jsonl, re-auth токены 15 
 Зависимости: A (audit для импорта). Риски: большие vault (тысячи файлов) →
 чанковая обработка в jobs, прогресс в UI.
 
-### Фаза C — «Ночной digest + soft delete + prompt injection»
-Состав:
+### Фаза C — «Ночной digest + soft delete + prompt injection» ✅
+Реализовано: app/jobs.py (daily_knowledge_digest: глобальный daemon-планировщик
+~60с, prefs.digest_enabled/digest_time (03:00 по умолчанию), kill switch,
+идемпотентность uid+date (done/running не повторяется), факты за 24ч из
+history.jsonl + activity.jsonl с дедупом, заметка Digests/<дата>.md с
+frontmatter date/type: digest/processed/tokens и provenance у каждой строки,
+smart-модель через budget.reserve/commit, mock — структурная заглушка,
+jobs.json — история 30 запусков), app/trash.py (soft delete:
+trash/<timestamp>_<relpath> + trash.json, restore c « (восстановлено)»,
+TTL 30 дней — при старте и раз в час), маршруты /api/jobs,
+/api/jobs/digest/run|backfill, /api/prefs/digest, /api/vault/trash (+/restore,
+GET-список), prompt injection: term.wrap_data() блоки ДАННЫЕ в терминале,
+вики-генераторе и digest + hardening-строка в CHAT_SYSTEM/SYSTEM/шаблонах,
+UI: карточка «Ночной digest» в Настройки→Модули и «Корзина» в Терминале,
+smoke 152/152 (было 141).
+Состав (исходный план):
 1. `daily_knowledge_digest` в jobs.py: идемпотентность по дате, inbox-заметки
    с provenance, история запусков, backfill-маршрут.
 2. Soft delete: `trash/` + TTL-очистка в jobs.
 3. Экранирование контекста заметок (данные ≠ инструкции) + smoke-тест injection.
 Критерии: два запуска digest за один день → одна заметка; удалённая заметка
-восстанавливается из trash; injection-тест зелёный.
+восстанавливается из trash; injection-тест зелёный. — все выполнены.
 Зависимости: B (jobs, импорт).
 
 ### Фаза D — «Telegram 2.0»

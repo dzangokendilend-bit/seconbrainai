@@ -818,6 +818,20 @@ ul.tasklist li.task::before{content:none}
   font-size:24px;flex:none}
 .pc-name{flex:1;min-width:160px}
 .pcard-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+
+/* ── Фаза C: ночной digest (настройки) + корзина (Терминал) ── */
+.tt-btns{float:right;display:flex;gap:4px}
+.tt-btns .tt-new{float:none}
+.dg-jobs .dg-row{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;
+  padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:12px}
+.dg-jobs .dg-row:last-child{border-bottom:none}
+.dg-jobs .dg-date{font-weight:600;min-width:86px}
+.dg-jobs .dg-st{padding:1px 8px;border-radius:10px;font-size:11px;
+  border:1px solid rgba(255,255,255,.15)}
+.dg-jobs .dg-st.done{color:#6be08a;border-color:rgba(107,224,138,.4)}
+.dg-jobs .dg-st.running{color:#8fb4ff;border-color:rgba(143,180,255,.4)}
+.dg-jobs .dg-st.error{color:var(--red);border-color:rgba(255,107,107,.4)}
+.dg-jobs .dg-err{color:var(--red);font-size:11px;width:100%}
 .pcard{position:relative;text-align:left;padding:14px;border-radius:var(--r-sm);
   border:1px solid var(--border);background:rgba(255,255,255,.035);color:var(--text);
   font-family:var(--ui);cursor:pointer;transition:.15s;display:flex;flex-direction:column;
