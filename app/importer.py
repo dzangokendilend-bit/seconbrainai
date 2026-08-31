@@ -52,24 +52,27 @@ def decode_zip(data_b64):
 
 
 def _norm_rel(name):
-    """Нормализация имени из ZIP. None — путь небезопасен (traversal/диск)."""
+    """Нормализация имени из ZIP. None — путь небезопасен.
+    security-аудит (hardening): БЕЗ lstrip("/") — абсолютный/UNC путь
+    из архива НЕ превращается в относительный, а отбрасывается.
+    Финальная гарантия — единый terminal.safe_path (см. _entries)."""
     rel = str(name or "").replace("\\", "/")
-    rel = "/".join(p for p in rel.split("/") if p not in ("", "."))
-    rel = rel.lstrip("/")
-    if not rel:
+    if chr(0) in rel or rel.startswith("/"):
+        return None  # абсолютный/UNC — отклонить, не преобразовывать
+    parts = [p for p in rel.split("/") if p not in ("", ".")]
+    if not parts or any(p == ".." or set(p) <= {"."} or ":" in p
+                        for p in parts):
         return None
-    for p in rel.split("/"):
-        if p == ".." or ":" in p:
-            return None
-    return rel
+    return "/".join(parts)
 
 
-def _entries(zip_src):
+def _entries(zip_src, vault):
     """Безопасное чтение архива в память: [(rel, bytes)], warnings.
     zip_src — байты архива ИЛИ путь к ZIP-файлу (стриминговая загрузка
     сервера пишет тело запроса во временный файл, чтобы 2ГБ не читались
     в RAM целиком). Битый ZIP / превышение лимитов → ImportError
-    (до каких-либо записей)."""
+    (до каких-либо записей). Каждый rel перепроверяется ЕДИНЫМ
+    terminal.safe_path — symlink/traversal/drive невозможны."""
     try:
         if isinstance(zip_src, str):
             zf = zipfile.ZipFile(zip_src)  # путь к temp-файлу
@@ -87,6 +90,11 @@ def _entries(zip_src):
             continue
         rel = _norm_rel(info.filename)
         if not rel:
+            warnings.append("пропущен небезопасный путь: " + str(info.filename)[:80])
+            continue
+        try:
+            term.safe_path(vault, rel)  # единая проверка всех путей архива
+        except ValueError:
             warnings.append("пропущен небезопасный путь: " + str(info.filename)[:80])
             continue
         if any(p == ".obsidian" for p in rel.split("/")):
@@ -136,10 +144,11 @@ def scan(uid, zip_src):
     (файлы, уже существующие в vault), предупреждения.
     zip_src — байты архива или путь к ZIP-файлу."""
     vault = os.path.join(auth.user_dir(uid), "vault")
-    entries, warnings = _entries(zip_src)
+    entries, warnings = _entries(zip_src, vault)
     conflicts = []
     for rel, _ in entries:
-        if os.path.exists(os.path.join(vault, *rel.split("/"))):
+        full, _rel = term.safe_path(vault, rel)
+        if os.path.exists(full):
             conflicts.append(rel)
     notes = sum(1 for rel, _ in entries if rel.lower().endswith(NOTE_EXT))
     return {"notes": notes,
@@ -172,7 +181,8 @@ def run(uid, zip_src, strategy="skip", job_id=None):
     zip_src — байты архива или путь к ZIP-файлу."""
     if strategy not in STRATEGIES:
         raise ImportError("стратегия должна быть одной из: " + ", ".join(STRATEGIES))
-    entries, warnings = _entries(zip_src)  # вся валидация — до потока
+    vault = os.path.join(auth.user_dir(uid), "vault")
+    entries, warnings = _entries(zip_src, vault)  # вся валидация — до потока
     job_id = job_id or ("imp_" + secrets.token_hex(6))
     with _LOCK:
         IMPORT_JOBS[job_id] = {"id": job_id, "status": "running", "progress": 0,
@@ -197,7 +207,8 @@ def _worker(uid, entries, strategy, job_id, warnings):
     try:
         for i, (rel, data) in enumerate(entries):
             sha = hashlib.sha256(data).hexdigest()
-            dest = os.path.join(vault, *rel.split("/"))
+            # запись: canonical-проверка родительского каталога (symlink наружу)
+            dest, _ = term.safe_path(vault, rel, for_write=True)
             status = "added"
             try:
                 if manifest.get(rel) == sha and os.path.exists(dest):
@@ -210,7 +221,7 @@ def _worker(uid, entries, strategy, job_id, warnings):
                         status = "overwritten"
                     else:  # copy → «имя (1).md»
                         rel2 = _copy_rel(vault, rel)
-                        dest = os.path.join(vault, *rel2.split("/"))
+                        dest, _ = term.safe_path(vault, rel2, for_write=True)
                         _write(dest, data)
                         status = "renamed"
                 else:

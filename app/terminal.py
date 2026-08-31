@@ -75,32 +75,74 @@ def parse_model_reply(raw):
     return raw, []
 
 
-def safe_path(vault, rel):
-    r"""security-аудит: каноническая проверка пути.
-    - null bytes запрещены сразу (иначе ValueError уже в open() -> 500);
-    - backslash -> "/" ДО разбора (..\..\, смешанные разделители ..\/);
-    - все all-dot компоненты (".", "..", "...", "....") отвергаются:
-      ".." — traversal, а "...." Win32 молча нормализует (trailing dots
-      strip) и откроет ДРУГОЙ файл внутри vault (path confusion);
-    - абсолютные пути и drive-буквы (C:, C:\\, \\server) запрещены явно
-      (lstrip("/") превращает /etc/passwd и \\server\share в относительные);
-    - realpath разрешает symlinks, сравнение с vault root через normcase
-      (Windows case-insensitive) + startswith с os.sep."""
+def _is_inside(root_n, target_n):
+    """Принадлежность target корню root (оба normcase'нуты realpath'ы).
+    os.path.commonpath сравнивает ПО КОМПОНЕНТАМ: /vault и /vault-backup
+    — разные корни (простой startswith без границы каталога пропустил бы)."""
+    try:
+        return os.path.commonpath([root_n, target_n]) == root_n
+    except ValueError:  # разные диски Windows
+        return False
+
+
+def safe_path(vault, rel, for_write=False):
+    r"""security-аудит (hardening): ЕДИНАЯ каноническая проверка пути для
+    всех файловых endpoints (vault/read|write, wiki/read|extract, terminal,
+    history.undo, importer). Возвращает (canonical_full, normalized_rel).
+
+    ВАЖНО про URL-encoding: parse_qs/urllib декодируют percent-encoding
+    РОВНО ОДИН раз ДО обработчика (двойной decode не выполняется) — сюда
+    приходит уже декодированное значение, поэтому %2Fetc%2Fpasswd виден
+    здесь как /etc/passwd и отвергается как абсолютный путь.
+
+    Алгоритм:
+      1) null byte → reject (иначе ValueError уже в open() -> 500);
+      2) ДО любой нормализации, ДО удаления слешей и ДО join с корнем:
+         исходный ввод (после strip) отвергается, если выглядит
+         абсолютным/UNC/drive/drive-relative — начинается с "/" или "\\"
+         (включая //server/share и \\server\share), содержит ":" (диск C:,
+         drive-relative C:relative.md, NTFS alternate data stream) или
+         смешанные разделители "/" и "\\". Абсолютный путь НЕ превращается
+         в относительный — отклоняется;
+      3) backslash -> "/", разбор по компонентам: пустые и all-dot
+         (".", "..", "...", "....") → reject (".." — traversal, "...."
+         Win32 молча нормализует — path confusion);
+      4) join с vault root; realpath цели и корня разрешает symlinks:
+         symlink внутри vault, ведущий наружу, раскрывается в реальный
+         путь вне корня и отвергается шагом 5 (и для чтения, и для записи);
+      5) принадлежность: _is_inside(normcase(realpath(root)),
+         normcase(realpath(target))) — покомпонентное commonpath-сравнение
+         с границей каталога; normcase — platform-aware регистр Windows;
+      6) для записи (for_write=True): канонический realpath РОДИТЕЛЬСКОГО
+         каталога проходит ту же проверку — конечный файл может не
+         существовать, но symlink родительской директории наружу не
+         позволяет выйти из vault."""
     raw = str(rel or "")
     if chr(0) in raw:
         raise ValueError("недопустимый путь: null byte")
-    rel = raw.strip().replace("\\", "/").replace(os.sep, "/").lstrip("/")
-    parts = [p for p in rel.split("/") if p != ""]
+    s = raw.strip()
+    if not s:
+        raise ValueError("пустой путь")
+    if s.startswith("/") or s.startswith("\\"):
+        raise ValueError("абсолютные и UNC-пути запрещены: " + raw)
+    if ":" in s:
+        raise ValueError("диск/двоеточие в пути запрещены: " + raw)
+    if "/" in s and "\\" in s:
+        raise ValueError("смешанные разделители запрещены: " + raw)
+    norm = s.replace("\\", "/")
+    parts = [p for p in norm.split("/") if p != ""]
     if not parts or any(set(p) <= {"."} for p in parts):
         raise ValueError("недопустимый путь: " + raw)
-    if os.path.isabs(rel) or (len(rel) >= 2 and rel[1] == ":"):
-        raise ValueError("абсолютные пути запрещены: " + rel)
     full = os.path.realpath(os.path.join(vault, *parts))
     vroot = os.path.realpath(vault)
     fn, fv = os.path.normcase(full), os.path.normcase(vroot)
-    if fn != fv and not fn.startswith(fv + os.sep):
-        raise ValueError("выход за пределы vault: " + rel)
-    return full, rel
+    if fn != fv and not _is_inside(fv, fn):
+        raise ValueError("выход за пределы vault: " + raw)
+    if for_write:
+        pdir = os.path.normcase(os.path.realpath(os.path.dirname(full)))
+        if not _is_inside(fv, pdir):
+            raise ValueError("родительский каталог вне vault: " + raw)
+    return full, "/".join(parts)
 
 
 def validate_ops(vault, ops):
@@ -133,7 +175,8 @@ def execute(vault, ops):
     res, records = [], []
     for op in ops:
         try:
-            full, rel = safe_path(vault, op["path"])
+            # мутации — с canonical-проверкой родительского каталога
+            full, rel = safe_path(vault, op["path"], for_write=True)
             if op["op"] == "create_note":
                 os.makedirs(os.path.dirname(full), exist_ok=True)
                 existed = os.path.exists(full)
@@ -156,7 +199,7 @@ def execute(vault, ops):
                 res.append("правка сохранена: " + rel)
                 records.append({"op": "edit_note", "path": rel, "prev": prev})
             elif op["op"] == "rename":
-                full2, rel2 = safe_path(vault, op["to"])
+                full2, rel2 = safe_path(vault, op["to"], for_write=True)
                 os.makedirs(os.path.dirname(full2), exist_ok=True)
                 if os.path.exists(full2):
                     raise ValueError("цель уже существует: " + rel2)
@@ -164,7 +207,7 @@ def execute(vault, ops):
                 res.append("переименовано: " + rel + " -> " + rel2)
                 records.append({"op": "rename", "path": rel, "to": rel2})
             elif op["op"] == "move":
-                full2, rel2 = safe_path(vault, op["to"])
+                full2, rel2 = safe_path(vault, op["to"], for_write=True)
                 os.makedirs(full2, exist_ok=True)
                 dest = os.path.join(full2, os.path.basename(full))
                 os.replace(full, dest)

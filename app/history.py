@@ -59,13 +59,13 @@ def undo(vault, hist_path, rec_id):
     op = rec.get("op")
     try:
         if op == "create_note":
-            full, rel = term.safe_path(vault, rec["path"])
+            full, rel = term.safe_path(vault, rec["path"], for_write=True)
             if not os.path.exists(full):
                 return False, "файл уже отсутствует: " + rel
             os.remove(full)  # единственное разрешённое удаление — откат созданного
             return True, "откачено создание: " + rel
         if op == "edit_note":
-            full, rel = term.safe_path(vault, rec["path"])
+            full, rel = term.safe_path(vault, rec["path"], for_write=True)
             prev = rec.get("prev")
             if prev is None:
                 # правка файла, которого раньше не было (перезапись create) — снять файл
@@ -77,8 +77,8 @@ def undo(vault, hist_path, rec_id):
                 f.write(prev)
             return True, "восстановлена прежняя версия: " + rel
         if op == "rename":
-            cur, cur_rel = term.safe_path(vault, rec["to"])
-            orig, orig_rel = term.safe_path(vault, rec["path"])
+            cur, cur_rel = term.safe_path(vault, rec["to"], for_write=True)
+            orig, orig_rel = term.safe_path(vault, rec["path"], for_write=True)
             if not os.path.exists(cur):
                 return False, "файл уже отсутствует: " + cur_rel
             if os.path.exists(orig):
@@ -87,8 +87,8 @@ def undo(vault, hist_path, rec_id):
             os.rename(cur, orig)
             return True, "переименование откачено: " + cur_rel + " -> " + orig_rel
         if op == "move":
-            cur, cur_rel = term.safe_path(vault, rec["to"])
-            orig, orig_rel = term.safe_path(vault, rec["path"])
+            cur, cur_rel = term.safe_path(vault, rec["to"], for_write=True)
+            orig, orig_rel = term.safe_path(vault, rec["path"], for_write=True)
             if not os.path.exists(cur):
                 return False, "файл уже отсутствует: " + cur_rel
             if os.path.exists(orig):

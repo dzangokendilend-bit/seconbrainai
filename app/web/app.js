@@ -99,10 +99,38 @@ function md(src) {
   return out.join("");
 }
 
+/* security-аудит (hardening): строгий allowlist data:image в <img>.
+   Разрешены ТОЛЬКО растровые форматы: png, jpeg, gif, webp, avif.
+   data:image/svg+xml ЗАПРЕЩЁН (SVG исполняет скрипты). Разбор строгой
+   функцией, НЕ startsWith("data:image"):
+   - trim, схема/MIME сравниваются в нижнем регистре (DATA:IMAGE/PNG ок,
+     DATA:IMAGE/SVG+XML отсекается allowlist'ом);
+   - обязательна запятая-граница (data:image/png без ,<data> — не URL);
+   - пробелы/управляющие символы внутри scheme+MIME → reject
+     (data: image/svg+xml не проходит);
+   - percent-encoding и HTML entities в scheme/MIME → reject: браузер НЕ
+     декодирует их в схеме data-URL, значит %2f / &#x2f; там — только
+     обход-попытка (data:image%2fsvg+xml отсекается);
+   - параметры после MIME (data:image/svg+xml;charset=…) не в allowlist.
+   http/https изображения работают как раньше. */
+function safeImgSrc(u) {
+  const s = String(u || "").trim();
+  if (/^https?:\/\//i.test(s)) return s;
+  const m = /^data:([^,]*),/.exec(s);
+  if (!m) return null;
+  const mt = m[1].toLowerCase();
+  if (mt.indexOf("%") >= 0 || mt.indexOf("&") >= 0 ||
+      /[\s\u0000-\u001f\u007f]/.test(mt)) return null;
+  return /^image\/(png|jpeg|gif|webp|avif)(;base64)?$/.test(mt) ? s : null;
+}
+
 function inl(x) {
   return x.replace(/`([^`]+)`/g, (m, c) => "<code>" + c + "</code>")
-    .replace(/!\[([^\]]*)\]\((https?:[^)\s]+|data:image\/[^)\s]+)\)/g,
-      '<img src="$2" alt="$1" loading="lazy">')
+    .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g,
+      (m, alt, src) => {
+        const safe = safeImgSrc(src);
+        return safe ? '<img src="' + safe + '" alt="' + alt + '" loading="lazy">' : m;
+      })
     .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
     .replace(/\*([^*\n]+)\*/g, "<i>$1</i>")
     .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,

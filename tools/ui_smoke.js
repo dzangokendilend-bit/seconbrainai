@@ -447,6 +447,127 @@ const consoleErrors = [], badResponses = [];
     body: JSON.stringify({path: "C:\\Windows\\win.ini"})});
   ok("security: /api/vault/read абсолютный путь C:\ → 400", secAbs.status === 400);
 
+  /* ── Security hardening: абсолютные/UNC/drive-relative/encoded/смешанные ── */
+  const absVectors = [
+    ["/etc/passwd", "абсолютный POSIX"],
+    ["//server/share/file.md", "UNC //server/share"],
+    ["\\\\server\\share\\file.md", "UNC \\\\server\\share"],
+    ["\\Windows\\win.ini", "win-абсолютный \\Windows"],
+    ["C:\\Windows\\win.ini", "диск C:\\"],
+    ["C:/Windows/win.ini", "диск C:/"],
+    ["C:relative.md", "drive-relative C:relative.md"],
+    ["folder\\file.md/sub", "смешанные разделители \\ и /"],
+  ];
+  for (const [vec, label] of absVectors) {
+    const r = await apiRaw("/api/vault/read", {method: "POST",
+      body: JSON.stringify({path: vec})});
+    ok("security hardening: " + label + " → 400", r.status === 400);
+  }
+  /* parse_qs декодирует percent-encoding ОДИН раз до handler —
+     %2Fetc%2Fpasswd приходит в safe_path как /etc/passwd и отклоняется */
+  const encAbs = await apiRaw("/api/wiki/read?path=%2Fetc%2Fpasswd");
+  ok("security hardening: URL-encoded %2Fetc%2Fpasswd (декодирован до handler) → 400",
+    encAbs.status === 400);
+  const encUnc = await apiRaw("/api/wiki/read?path=%5C%5Cserver%5Cshare%5Cfile.md");
+  ok("security hardening: URL-encoded UNC %5C%5Cserver%5Cshare → 400",
+    encUnc.status === 400);
+  const encMix = await apiRaw("/api/vault/read", {method: "POST",
+    body: JSON.stringify({path: "..\\/..\\/config.json"})});
+  ok("security hardening: смешанные ..\\/..\\/ → 400", encMix.status === 400);
+
+  /* юнит-скрипт safe_path: граница /vault vs /vault-backup (commonpath
+     против startswith), drive-relative, UNC, junction наружу (mklink /J)
+     для чтения И записи — то, что через API недостижимо */
+  const unitPy = path.join(tmpDir, "test_safe_path_unit.py");
+  fs.writeFileSync(unitPy, [
+    "import os, sys, tempfile, subprocess, shutil",
+    "sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'app'))",
+    "import terminal as term",
+    "BS = chr(92)",
+    "tmp = tempfile.mkdtemp(prefix='monica_sp_')",
+    "root = os.path.join(tmp, 'vault')",
+    "root2 = os.path.join(tmp, 'vault-backup')",
+    "os.makedirs(root); os.makedirs(root2)",
+    "open(os.path.join(root, 'note.md'), 'w').write('x')",
+    "open(os.path.join(root2, 'f.md'), 'w').write('x')",
+    "n = 0",
+    "def must_raise(vault, rel, **kw):",
+    "    global n",
+    "    try: term.safe_path(vault, rel, **kw)",
+    "    except ValueError: n += 1; return",
+    "    print('FAIL: safe_path(%r) должен был отклонить' % rel); sys.exit(1)",
+    "def must_ok(vault, rel, **kw):",
+    "    global n",
+    "    term.safe_path(vault, rel, **kw); n += 1",
+    "rn = os.path.normcase(os.path.realpath(root))",
+    "r2n = os.path.normcase(os.path.realpath(os.path.join(root2, 'f.md')))",
+    "assert term._is_inside(rn, rn) is True",
+    "assert term._is_inside(rn, r2n) is False, 'commonpath должен различать vault и vault-backup'",
+    "n += 2",
+    "must_raise(root, '../vault-backup/f.md')",
+    "must_raise(root, '..' + BS + 'vault-backup' + BS + 'f.md')",
+    "must_raise(root, '../secret.md')",
+    "must_raise(root, 'a/../../secret.md')",
+    "must_raise(root, '/etc/passwd')",
+    "must_raise(root, '//server/share/file.md')",
+    "must_raise(root, BS + BS + 'server' + BS + 'share' + BS + 'file.md')",
+    "must_raise(root, BS + 'Windows' + BS + 'win.ini')",
+    "must_raise(root, 'C:' + BS + 'Windows' + BS + 'win.ini')",
+    "must_raise(root, 'C:/Windows/win.ini')",
+    "must_raise(root, 'C:relative.md')",
+    "must_raise(root, 'folder' + BS + 'file.md/sub')",
+    "must_raise(root, '.../x.md')",
+    "must_ok(root, 'note.md')",
+    "must_ok(root, 'sub/dir/note.md', for_write=True)",
+    "outside = os.path.join(tmp, 'outside'); os.makedirs(outside)",
+    "open(os.path.join(outside, 'secret.txt'), 'w').write('TOPSECRET')",
+    "link = os.path.join(root, 'lnk')",
+    "r = subprocess.run(['cmd', '/c', 'mklink', '/J', link, outside], capture_output=True)",
+    "if r.returncode == 0:",
+    "    must_raise(root, 'lnk/secret.txt')",
+    "    must_raise(root, 'lnk/evil.md', for_write=True)",
+    "    must_raise(root, 'lnk/sub/evil.md', for_write=True)",
+    "    subprocess.run(['cmd', '/c', 'rmdir', link], capture_output=True)",
+    "else:",
+    "    print('SKIP: mklink /J недоступен на этой машине')",
+    "shutil.rmtree(tmp, ignore_errors=True)",
+    "print('OK', n)"].join("\n"));
+  let unitOut = "";
+  try {
+    unitOut = execSync('python "' + unitPy + '"', {encoding: "utf8"});
+  } catch (e) {
+    unitOut = String((e && e.stdout) || "") + " " + String((e && e.message) || e);
+  }
+  ok("security hardening: юнит-скрипт safe_path (vault vs vault-backup, UNC, drive-relative, junction наружу) — " +
+    unitOut.trim().split("\n").pop(), /^OK \d+/m.test(unitOut));
+  try { fs.unlinkSync(unitPy); } catch (e) {}
+
+  /* symlink наружу из vault: junction (Windows, без админ-прав) →
+     чтение И запись через API отклоняются (realpath + commonpath) */
+  const vaultDir = path.join(__dirname, "..", "data", "users", USER, "vault");
+  const secretDir = path.join(tmpDir, "outside-secret-" + tag);
+  fs.mkdirSync(secretDir, {recursive: true});
+  fs.writeFileSync(path.join(secretDir, "secret.txt"), "TOPSECRET");
+  const linkPath = path.join(vaultDir, "evil-link-" + tag);
+  let symlinkMade = false, symlinkErr = "";
+  try {
+    fs.symlinkSync(secretDir, linkPath, "junction");
+    symlinkMade = true;
+  } catch (e) { symlinkErr = String((e && e.message) || e); }
+  if (symlinkMade) {
+    const sr = await apiRaw("/api/vault/read", {method: "POST",
+      body: JSON.stringify({path: "evil-link-" + tag + "/secret.txt"})});
+    ok("security hardening: symlink наружу (чтение через API) → 400", sr.status === 400);
+    const sw = await apiRaw("/api/vault/write", {method: "POST",
+      body: JSON.stringify({path: "evil-link-" + tag + "/evil.md", content: "x"})});
+    ok("security hardening: symlink наружу (запись через API) → 400", sw.status === 400);
+    try { fs.unlinkSync(linkPath); } catch (e) {}
+  } else {
+    ok("security hardening: symlink наружу — junction в Node не создался (" +
+      symlinkErr.slice(0, 90) + ") — покрыт юнит-скриптом mklink /J", true);
+  }
+  try { fs.rmSync(secretDir, {recursive: true, force: true}); } catch (e) {}
+
   /* ── Реворк вики: UI — frontmatter, wikilinks, race-guard ── */
   const wtag = String(Date.now() % 1000000);
   const mkNote = (p, c) => apiRaw("/api/vault/write", {method: "POST",
@@ -585,6 +706,54 @@ const consoleErrors = [], badResponses = [];
   ok("security: XSS-заметка — HTML видимо экранирован",
     xs.txt.indexOf("<script>") >= 0 && xs.txt.indexOf("<svg") >= 0 &&
     xs.txt.indexOf("javascript:alert(93)") >= 0);
+  await page.screenshot({path: path.join(__dirname, "ui_last.png")});
+
+  /* ── Security hardening: data:image allowlist в inl() ── */
+  const PNG1x1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ" +
+    "AAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const WEBP1x1 = "data:image/webp;base64,UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==";
+  const SVG_B64 = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjwvc3ZnPg==";
+  const dtag = "DI" + (Date.now() % 1000000);
+  await mkNote("wiki-test/" + dtag + ".md",
+    "---\ntitle: " + dtag + "\n---\n\n" +
+    "![png](" + PNG1x1 + ")\n\n" +
+    "![webp](" + WEBP1x1 + ")\n\n" +
+    "![httpimg](" + BASE + "/web/favicon.svg)\n\n" +
+    "![svg](data:image/svg+xml;base64," + SVG_B64 + ")\n\n" +
+    "![svgenc](data:image%2fsvg+xml;base64," + SVG_B64 + ")\n\n" +
+    "![svgupper](DATA:IMAGE/SVG+XML;base64," + SVG_B64 + ")\n\n" +
+    "![svgparam](data:image/svg+xml;charset=utf-8;base64," + SVG_B64 + ")\n\n" +
+    "![svgspace](data: image/svg+xml;base64," + SVG_B64 + ")\n");
+  /* заметка создана уже после загрузки дерева — перезагружаем вики-дерево */
+  await page.reload({waitUntil: "networkidle0", timeout: 15000});
+  await page.waitForSelector("#scr-app:not(.hidden)", {timeout: 8000}).catch(() => {});
+  await page.click('.cs-navitem[data-tab="wiki"]');
+  await new Promise(r => setTimeout(r, 1200));
+  await page.evaluate(t => {
+    const i = document.getElementById("wk-q");
+    i.value = t;
+    i.dispatchEvent(new Event("input"));
+  }, dtag);
+  await new Promise(r => setTimeout(r, 400));
+  ok("security hardening: data:image-заметка найдена в дереве", await openWkFile(dtag));
+  await page.waitForSelector("#wk-view .firstHeading", {timeout: 5000}).catch(() => {});
+  await new Promise(r => setTimeout(r, 900)); /* загрузка изображений */
+  const dimgs = await page.$$eval("#wk-view img", els => els.map(i => i.getAttribute("src")))
+    .catch(() => []);
+  ok("security hardening: png data URL отрендерен как <img>",
+    dimgs.some(s => s.indexOf("data:image/png") === 0));
+  ok("security hardening: webp data URL отрендерен как <img>",
+    dimgs.some(s => s.indexOf("data:image/webp") === 0));
+  ok("security hardening: http-изображение работает как раньше",
+    dimgs.some(s => s.indexOf(BASE + "/web/favicon.svg") === 0));
+  ok("security hardening: data:image/svg+xml (и все обходы: %2f, UPPER, charset, пробел) не попал в DOM как <img>",
+    !dimgs.some(s => /^data:image\/svg/i.test(s)));
+  const pngDecoded = await page.$eval("#wk-view img[src^='data:image/png']",
+    i => i.naturalWidth === 1).catch(() => false);
+  ok("security hardening: png data URL декодирован браузером (naturalWidth=1)", pngDecoded);
+  const dviewTxt = await page.$eval("#wk-view", el => el.textContent).catch(() => "");
+  ok("security hardening: заблокированные svg-data-URL остались инертным текстом",
+    dviewTxt.indexOf("data:image/svg+xml") >= 0);
   await page.screenshot({path: path.join(__dirname, "ui_last.png")});
 
   ok("нет ошибок JS в консоли", consoleErrors.length === 0);

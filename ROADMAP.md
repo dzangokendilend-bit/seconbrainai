@@ -66,7 +66,12 @@ e4d33e9 fix: клики по бета-баннеру (pointer-events)
 rate limits, состояния ключей), Фаза B (импорт vault 2.0, heatmap, re-auth gate),
 security-аудит: md()/inl() escape-first с экранированием кавычек (attribute-injection
 XSS в img/a/wikilink-алиасах закрыт), safe_path канонический (realpath+normcase,
-null bytes, backslash, all-dot компоненты, абсолютные пути), ui_smoke 121/121.
+null bytes, backslash, all-dot компоненты, абсолютные пути), security hardening:
+strict absolute/UNC/drive path rejection в safe_path (lstrip-конверсия убрана),
+commonpath-граница vault (vault ≠ vault-backup), canonical-проверка родителя при
+записи (symlink наружу отклоняется), единый safe_path во всех файловых endpoints
+(включая importer), строгий data:image allowlist в inl() (svg+xml запрещён),
+ui_smoke 141/141.
 `mock_llm: true` — модели пока заглушки (переключает автор при наличии ключей).
 
 ## 3. Дорожная карта

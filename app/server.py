@@ -830,7 +830,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             slug = "".join(c if c.isalnum() else "-" for c in title.lower()).strip("-")[:40] or "session"
             try:
-                full, rel = term.safe_path(vault, "inbox/" + slug + ".md")
+                # запись: canonical-проверка родительского каталога
+                full, rel = term.safe_path(vault, "inbox/" + slug + ".md",
+                                           for_write=True)
             except ValueError as e:
                 self._json({"error": str(e)}, 400)
                 return
@@ -875,7 +877,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/vault/write":
             vault = os.path.join(auth.user_dir(uid), "vault")
             try:
-                full, rel = term.safe_path(vault, body.get("path"))
+                # запись: canonical-проверка родительского каталога (symlink наружу)
+                full, rel = term.safe_path(vault, body.get("path"), for_write=True)
             except ValueError as e:
                 self._json({"error": str(e)}, 400)
                 return
@@ -1012,15 +1015,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             with open(src, encoding="utf-8", errors="replace") as f:
                 src_text = f.read()
-            ex_dir = os.path.join(vault, "Выжимки")
-            os.makedirs(ex_dir, exist_ok=True)
-            out = os.path.join(ex_dir, title + ".md")
+            # запись выжимки — через общий safe_path (canonical-проверка родителя)
+            out, out_rel = term.safe_path(vault, "Выжимки/" + title + ".md",
+                                          for_write=True)
+            os.makedirs(os.path.dirname(out), exist_ok=True)
             with open(out, "w", encoding="utf-8", newline="\n") as f:
                 f.write("---\ntitle: Выжимка — " + title + "\ntags: [extract]\n"
                         "source: " + rel + "\ncreated: " + time.strftime("%Y-%m-%d")
                         + "\n---\n\n# Выжимка — " + title + "\n\nИсточник: [[" + rel + "]]\n\n"
                         + src_text[:3000] + "\n")
-            self._json({"ok": True, "path": "Выжимки/" + title + ".md"})
+            self._json({"ok": True, "path": out_rel})
             return
         if path == "/api/analytics/summary":
             # Фаза B: как heatmap — только с re-auth токеном (4221 удалён)
