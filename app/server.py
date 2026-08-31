@@ -781,9 +781,28 @@ class Server(ThreadingHTTPServer):
 
 
 if __name__ == "__main__":
+    # Фаза 8-prep: опциональный HTTPS — config.json → "ssl": {"cert": "...", "key": "..."}
+    scheme = "http"
+    if config.SSL_CERT and config.SSL_KEY:
+        import ssl
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(config.SSL_CERT, config.SSL_KEY)
+        _orig_new = Server.get_request
+        def _get_request(self, *a, **kw):
+            sock, addr = _orig_new(self, *a, **kw)
+            try:
+                return ctx.wrap_socket(sock, server_side=True), addr
+            except ssl.SSLError:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+                raise
+        Server.get_request = _get_request
+        scheme = "https"
     with Server((config.HOST, config.PORT), Handler) as httpd:
         tgbot.start_all()
-        print(f"Monica 1.0 (phase 3) -> http://{config.HOST}:{config.PORT}")
+        print(f"Monica 1.0 -> {scheme}://{config.HOST}:{config.PORT}")
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
