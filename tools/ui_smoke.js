@@ -10,6 +10,29 @@ const BASE = process.argv[2] || "http://127.0.0.1:8900";
 const USER = process.env.MONICA_USER || "tester_one";
 const PASS = process.env.MONICA_PASS || "secret123";
 
+/* Каталог данных сервера: MONICA_DATA_DIR (env) → .env → <проект>/data —
+   ровно как app/config.py. Без этого тест читал СТАРУЮ базу <проект>/data,
+   пока сервер работает с другой (D1 hash / audit / vault-проверки). */
+function resolveDataDir() {
+  let v = process.env.MONICA_DATA_DIR || "";
+  if (!v) {
+    try {
+      const envTxt = fs.readFileSync(path.join(__dirname, "..", ".env"), "utf8");
+      const m = envTxt.match(/^\s*MONICA_DATA_DIR\s*=\s*(.+?)\s*$/m);
+      if (m) v = m[1].replace(/^["']|["']$/g, "");
+    } catch (e) { /* .env нет — dev-default */ }
+  }
+  return path.resolve(v || path.join(__dirname, "..", "data"));
+}
+const DATA_DIR = resolveDataDir();
+function findUid(username) {
+  try {
+    const idx = JSON.parse(fs.readFileSync(
+      path.join(DATA_DIR, "users", "index.json"), "utf8"));
+    return idx[String(username || "").toLowerCase()] || null;
+  } catch (e) { return null; }
+}
+
 function findBrowser() {
   const candidates = [
     "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
@@ -170,6 +193,17 @@ const consoleErrors = [], badResponses = [];
   ok("профильная карточка: юзернейм", await page.$(".profcard .un"));
   ok("профильная карточка: статус онлайн", await page.$(".profcard .st i"));
 
+  /* Изоляция прогонов: smoke-заметка для проверки wiki-фильтра создаётся
+     ДО первого открытия вкладки wiki (дерево кэшируется в drawWikiTree).
+     Имя стабильное — write идемпотентен, vault не растёт между прогонами. */
+  await page.evaluate(async () => {
+    await fetch("/api/vault/write", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({path: "smoke-notes/animations-smoke.md",
+        content: "---\ntitle: animations smoke\ntags: [smoke]\n" +
+          "created: 2026-01-01\n---\n\n# animations\n\nsmoke filter note\n"})});
+  });
+
   /* 3. вкладки */
   async function tab(name, sel, what) {
     await page.click('.cs-navitem[data-tab="' + name + '"]');
@@ -256,7 +290,15 @@ const consoleErrors = [], badResponses = [];
     ok("вики-реворк: состояние папок после перезагрузки (нет папок — пропуск)", true);
   }
   await tab("tg", "#tg-body", "статус бота");
-  /* Фаза B: аналитика за re-auth gate — сначала форма, потом сводка */
+  /* Фаза B: аналитика за re-auth gate — сначала форма, потом сводка.
+     Изоляция прогонов: включаем модуль аналитики сами (штатный /api/modules),
+     а не полагаемся на ручное состояние тестового юзера — иначе /api/
+     analytics/summary честно отдаёт 403 «модуль выключен». */
+  await page.evaluate(async () => {
+    await fetch("/api/modules", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({module: "analytics", enabled: true})});
+  });
   await tab("ana", "#ana-pass", "форма re-auth аналитики");
   ok("Фаза B: в UI нет пароля 4221 (поле «пароль аккаунта»)",
     await page.$eval("#ana-pass", el => el.placeholder.indexOf("аккаунта") >= 0).catch(() => false));
@@ -556,7 +598,7 @@ const consoleErrors = [], badResponses = [];
 
   /* symlink наружу из vault: junction (Windows, без админ-прав) →
      чтение И запись через API отклоняются (realpath + commonpath) */
-  const vaultDir = path.join(__dirname, "..", "data", "users", USER, "vault");
+  const vaultDir = path.join(DATA_DIR, "users", findUid(USER) || USER, "vault");
   const secretDir = path.join(tmpDir, "outside-secret-" + tag);
   fs.mkdirSync(secretDir, {recursive: true});
   fs.writeFileSync(path.join(secretDir, "secret.txt"), "TOPSECRET");
@@ -874,12 +916,15 @@ const consoleErrors = [], badResponses = [];
     (lt2.status === 200 && lt2.data.ok && lt2.data.code && lt2.data.code !== lt1.data.code) ||
     lt2.status === 429);
   const tokRecs = JSON.parse(fs.readFileSync(
-    path.join(__dirname, "..", "data", "telegram", "link_tokens.json"), "utf8"));
+    path.join(DATA_DIR, "telegram", "link_tokens.json"), "utf8"));
+  /* uid-фильтр ≥1: при повторных прогонах обе попытки могут упереться в
+     rate limit 429 и новых записей не создать — структура всё равно
+     проверяется на всех записях; plaintext-код не должен утечь в файл */
   ok("D1: токен хранится только как sha256-хеш (hash ≠ код, кода нет в файле)",
-    tokRecs.filter(r => r.monica_user_id === uidD1).length >= 2 &&
+    tokRecs.filter(r => r.monica_user_id === uidD1).length >= 1 &&
     tokRecs.every(r => r.token_hash && r.token_hash.length === 64) &&
-    !JSON.stringify(tokRecs).includes(lt1.data.code) &&
-    !JSON.stringify(tokRecs).includes(lt2.data.code));
+    (!lt1.data.code || !JSON.stringify(tokRecs).includes(lt1.data.code)) &&
+    (!lt2.data.code || !JSON.stringify(tokRecs).includes(lt2.data.code)));
   /* юнит-скрипт: жизненный цикл токенов + команды + conflict/group/duplicate */
   const unitTg = path.join(tmpDir, "test_tg_unit.py");
   fs.writeFileSync(unitTg, [
@@ -1016,8 +1061,8 @@ const consoleErrors = [], badResponses = [];
   ok("D1: отвязка через веб → /status link=null",
     ulD1.status === 200 && ulD1.data.ok && stD1b.data.link === null);
   /* bot token нигде не светится */
-  const sysAudit = path.join(__dirname, "..", "data", "audit", "system.jsonl");
-  const userAudit = path.join(__dirname, "..", "data", "users", uidD1, "audit.jsonl");
+  const sysAudit = path.join(DATA_DIR, "audit", "system.jsonl");
+  const userAudit = path.join(DATA_DIR, "users", uidD1, "audit.jsonl");
   const auditAll = (fs.existsSync(sysAudit) ? fs.readFileSync(sysAudit, "utf8") : "") +
     (fs.existsSync(userAudit) ? fs.readFileSync(userAudit, "utf8") : "");
   ok("D1: bot token не появляется в /api/me, /api/tg/link/status и audit",
