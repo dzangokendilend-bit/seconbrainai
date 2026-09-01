@@ -1,0 +1,29 @@
+# Monica 1.0 — Docker Compose (P0).
+# Секреты — в .env рядом с этим файлом (env_file); данные — в volume.
+services:
+  monica:
+    build: .
+    image: monica:1.0
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # внутри контейнера слушаем все интерфейсы; данные — в volume
+      MONICA_HOST: 0.0.0.0
+      MONICA_DATA_DIR: /data
+      PORT: "8900"
+    ports:
+      # наружу — PORT из .env (по умолчанию 8900)
+      - "${PORT:-8900}:8900"
+    volumes:
+      - monica_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys;sys.exit(0 if b'ok' in urllib.request.urlopen('http://127.0.0.1:8900/health',timeout=4).read() else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  monica_data:

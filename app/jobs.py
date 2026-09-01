@@ -154,12 +154,18 @@ def _smart_target(uid):
 
 
 def _generate_digest(uid, date, facts):
-    """Пишет vault/Digests/<date>.md. Возвращает (rel, processed, tokens)."""
+    """Пишет vault/Digests/<date>.md. Возвращает (rel, processed, tokens).
+    P0: digest_llm_enabled (prefs, default false) — пока false, digest
+    работает в mock/structured режиме и НЕ тратит реальные токены, даже
+    если mock_llm=false. Реальная модель — только по явному toggle в UI."""
     vault = os.path.join(auth.user_dir(uid), "vault")
     svc, api_mdl = _smart_target(uid)
     user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
-    api_key = user_keys.get(svc) or ""
-    mock = bool(config.CFG.get("mock_llm"))
+    # P0: fallback на серверный ключ из env (клиенту не отдаётся)
+    api_key = providers.resolve_key(user_keys.get(svc), svc) or ""
+    prefs = (auth.load_profile(uid).get("onboarding", {}).get("prefs") or {})
+    digest_llm = bool(prefs.get("digest_llm_enabled"))
+    mock = bool(config.CFG.get("mock_llm")) or not digest_llm
     if not mock and not api_key:
         raise RuntimeError("нет ключа для сервиса " + svc +
                            " — добавь в настройках")
@@ -168,7 +174,9 @@ def _generate_digest(uid, date, facts):
     tokens = 0
     if mock:
         # структурная заглушка без LLM: digest = список событий с provenance
-        summary = ("[mock] Структурная заглушка digest (mock_llm: true — "
+        why = ("mock_llm: true" if config.CFG.get("mock_llm")
+               else "digest_llm_enabled: false — токены не тратятся")
+        summary = ("[mock] Структурная заглушка digest (" + why + " — "
                    "LLM не вызывался). Ниже полный список событий дня "
                    "с provenance; после включения реальных моделей здесь "
                    "появится резюме и извлечённые задачи/решения/идеи.")

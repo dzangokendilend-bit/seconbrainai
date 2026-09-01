@@ -182,3 +182,28 @@ MV3, сохранение страницы/выделения, allowlist дом�
    маршруты тонкие.
 4. SerpAPI 250 запросов/мес — дневной лимит + кэш.
 5. Совместные проекты = новая модель доверия — не запускать до фаз A–C.
+
+
+## 4. P0 — Production Readiness (выполнено, smoke 189/189)
+
+- **Слой секретов**: app/config.py — .env-парсер (stdlib), приоритет
+  env > .env > config.json; секреты (machine_secret, telegram_*, LLM-ключи) —
+  только из env/.env, config.json — устаревший fallback со startup-warning;
+  .env.example; безопасный startup report при старте сервера.
+- **MONICA_DATA_DIR**: все mutable-данные (users/, telegram/, sessions/,
+  audit/, backups/, tmp/) внутри DATA_DIR; валидация на старте;
+  tools/migrate_data.py (--to, --dry-run) — копирование без удаления.
+- **Backup/restore**: tools/backup_restore.py — ZIP + manifest.json (sha256
+  каждого файла, самопроверка), restore только в новую пустую директорию
+  (--dry-run/--yes); keys.enc включён (MONICA_MACHINE_SECRET хранить
+  отдельно); docs/backup-restore.md.
+- **Docker**: Dockerfile (python:3.12-slim, non-root), .dockerignore,
+  compose.yaml (env_file, volume, healthcheck), /health = {"status": "ok"};
+  docs/deploy.md.
+- **monica doctor**: tools/doctor.py — 13 проверок [OK]/[WARN]/[ERROR],
+  без секретов; polling XOR webhook (конфликт = ERROR).
+- **digest_llm_enabled** (prefs, default false): digest не тратит токены LLM
+  без явного toggle в UI; серверные fallback LLM-ключи из env — не клиенту.
+- **Тесты**: tools/p0_tests.py (18: env override, mock/real, digest-гейт,
+  MONICA_DATA_DIR, migrate dry-run, backup manifest/checksum, restore,
+  doctor, health/API без секретов) + 4 проверки в ui_smoke.js (189/189).

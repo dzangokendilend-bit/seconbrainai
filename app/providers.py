@@ -2,10 +2,22 @@
 # Сервисы: glm (терминал/быстрые), smart (OpenRouter, глубокие модели), luna (чат/бот).
 # Базовые URL и id моделей — в config.json (секция providers).
 # mock_llm=true в config.json — тестовый режим без реальных ключей.
+# P0: серверные fallback-ключи из env (config.ENV_LLM_KEYS) — если у
+# пользователя нет своего ключа сервиса; клиенту никогда не отправляются.
 import json
 import urllib.request
 
 import config
+
+
+def resolve_key(user_key, service):
+    """P0: ключ пользователя приоритетнее; иначе серверный fallback из env.
+    Возвращает строку ключа или None (если ключей нет совсем)."""
+    k = (user_key or "").strip()
+    if k:
+        return k
+    fb = (config.ENV_LLM_KEYS.get(service) or "").strip()
+    return fb or None
 
 
 def _estimate_tokens(messages, extra=""):

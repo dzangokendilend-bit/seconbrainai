@@ -251,8 +251,9 @@ class Handler(BaseHTTPRequestHandler):
         if length > MAX_UPLOAD:
             self._json({"error": "архив больше 2ГБ — лимит загрузки"}, 413)
             return None
-        os.makedirs(os.path.join("data", "tmp"), exist_ok=True)
-        fd, tmp = tempfile.mkstemp(suffix=".zip", dir=os.path.join("data", "tmp"))
+        # P0: temp внутри DATA_DIR (не зависит от cwd)
+        os.makedirs(config.TMP_DIR, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(suffix=".zip", dir=config.TMP_DIR)
         written = 0
         try:
             with os.fdopen(fd, "wb") as f:
@@ -357,7 +358,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
         if path == "/health":
-            self._json({"ok": True, "service": "monica", "phase": 1})
+            # P0: минимальный ответ — без ключей/путей/конфигурации
+            self._json({"status": "ok"})
             return
         if path == "/api/me":
             uid = self._uid()
@@ -726,10 +728,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/prefs/digest":
             # Фаза C: настройки ночного digest (prefs.digest_enabled/digest_time)
+            # P0: digest_llm_enabled (default false) — реальная LLM-модель
+            # для digest только по явному согласию пользователя.
             p = auth.load_profile(uid)
             prefs = p.setdefault("onboarding", {}).setdefault("prefs", {})
             if "enabled" in body:
                 prefs["digest_enabled"] = body.get("enabled") is True
+            if "llm_enabled" in body:
+                prefs["digest_llm_enabled"] = body.get("llm_enabled") is True
             t = str(body.get("time") or "").strip()
             if t:
                 if not re.match(r"^\d{2}:\d{2}$", t):
@@ -742,7 +748,9 @@ class Handler(BaseHTTPRequestHandler):
                       date=prefs.get("digest_time", "03:00"))
             self._json({"ok": True,
                         "digest_enabled": prefs.get("digest_enabled", False),
-                        "digest_time": prefs.get("digest_time", "03:00")})
+                        "digest_time": prefs.get("digest_time", "03:00"),
+                        "digest_llm_enabled":
+                            prefs.get("digest_llm_enabled", False)})
             return
 
         if path == "/api/jobs/digest/run":
@@ -883,7 +891,9 @@ class Handler(BaseHTTPRequestHandler):
             analytics.track(uid, "chat")  # Фаза B: событие для heatmap
             service, api_mdl = resolve_model(uid, "light")  # 6-O4: лёгкая модель
             user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
-            if not user_keys.get(service):
+            # P0: fallback на серверный ключ из env (клиенту не отдаётся)
+            api_key = providers.resolve_key(user_keys.get(service), service)
+            if not api_key:
                 self._json({"error": "нет ключа для сервиса " + service + " — добавь в настройках"}, 400)
                 return
             history = body.get("history") or []
@@ -910,7 +920,7 @@ class Handler(BaseHTTPRequestHandler):
                             "budget": budget.status(uid)}, 429)
                 return
             try:
-                reply, usage = providers.chat(service, user_keys[service], api_mdl,
+                reply, usage = providers.chat(service, api_key, api_mdl,
                                               messages, with_usage=True)
             except Exception as e:
                 budget.release(uid, est)
@@ -937,7 +947,9 @@ class Handler(BaseHTTPRequestHandler):
             analytics.track(uid, "chat")  # Фаза B: событие для heatmap
             service, api_mdl = resolve_model(uid, "light")  # 6-O4: лёгкая модель
             user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
-            if not user_keys.get(service):
+            # P0: fallback на серверный ключ из env (клиенту не отдаётся)
+            api_key = providers.resolve_key(user_keys.get(service), service)
+            if not api_key:
                 self._json({"error": "нет ключа для сервиса " + service + " — добавь в настройках"}, 400)
                 return
             history = body.get("history") or []
@@ -969,7 +981,7 @@ class Handler(BaseHTTPRequestHandler):
             usage_out = {}
             sent = 0
             try:
-                for delta in providers.chat_stream(service, user_keys[service], api_mdl,
+                for delta in providers.chat_stream(service, api_key, api_mdl,
                                                    messages, usage_out=usage_out):
                     if delta:
                         sent += len(delta)
@@ -993,7 +1005,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
             svc, api_mdl = resolve_model(uid, "smart")  # 6-O4: сложная модель
-            if not user_keys.get(svc):
+            # P0: fallback на серверный ключ из env (клиенту не отдаётся)
+            term_key = providers.resolve_key(user_keys.get(svc), svc)
+            if not term_key:
                 self._json({"error": "терминалу нужен ключ сервиса " + svc + " — добавь в настройках"}, 400)
                 return
             vault = os.path.join(auth.user_dir(uid), "vault")
@@ -1006,7 +1020,7 @@ class Handler(BaseHTTPRequestHandler):
                             "budget": budget.status(uid)}, 429)
                 return
             try:
-                raw, usage = providers.chat(svc, user_keys[svc], api_mdl,
+                raw, usage = providers.chat(svc, term_key, api_mdl,
                                             messages, with_usage=True)
             except Exception as e:
                 budget.release(uid, est)
@@ -1194,7 +1208,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "модуль Википедия выключен"}, 403)
                 return
             user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
-            if not user_keys.get("smart"):
+            # P0: fallback на серверный ключ из env (клиенту не отдаётся)
+            wiki_key = providers.resolve_key(user_keys.get("smart"), "smart")
+            if not wiki_key:
                 self._json({"error": "генерации нужен ключ OpenRouter (smart) — добавь в настройках"}, 400)
                 return
             vault = os.path.join(auth.user_dir(uid), "vault")
@@ -1212,7 +1228,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 try:
-                    art = mon_mods.generate_article(vault, rel, user_keys["smart"])
+                    art = mon_mods.generate_article(vault, rel, wiki_key)
                     mon_mods.dequeue(udir, rel)
                     done.append(art)
                 except Exception as e:
@@ -1491,7 +1507,14 @@ if __name__ == "__main__":
                 raise
         Server.get_request = _get_request
         scheme = "https"
+    # P0: проверка DATA_DIR до старта (падаем сразу с понятной ошибкой)
+    _dd = config.data_dir_problem()
+    if _dd:
+        print("[ERROR] " + _dd, file=sys.stderr)
+        sys.exit(1)
     with Server((config.HOST, config.PORT), Handler) as httpd:
+        # P0: безопасный startup report (stderr, без секретов)
+        config.startup_report()
         tgbot.start_all()
         # Фаза C: TTL-очистка корзин при старте + глобальный планировщик
         # (digest по расписанию, hourly trash sweep) — один daemon-поток

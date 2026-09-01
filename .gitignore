@@ -1,6 +1,6 @@
-data/users/
-data/backups/
-data/sessions/
+# P0: весь mutable-каталог данных вне git (users/, telegram/, sessions/,
+# audit/, backups/, tmp/ — всё внутри data/)
+data/
 config.json
 __pycache__/
 *.pyc
@@ -9,4 +9,8 @@ __pycache__/
 
 node_modules/
 tools/ui_*.png
-backups/ 
+backups/
+tmp/
+tools/second-brain/
+tools/second-brain.zip
+tools/ui_*.png.orig

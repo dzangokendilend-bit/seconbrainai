@@ -1402,6 +1402,25 @@ const consoleErrors = [], badResponses = [];
     dgRows >= 1);
   await page.screenshot({path: path.join(__dirname, "ui_last.png")});
 
+  /* ── P0: секреты не утекают в API, health минимален, digest-LLM toggle ── */
+  const p0Health = await apiRaw("/health");
+  ok("P0: /health — {status: ok} без чувствительных данных",
+    p0Health.status === 200 && p0Health.data.status === "ok" &&
+    !/token|secret|machine|path/i.test(JSON.stringify(p0Health.data)));
+  const p0Me = await apiRaw("/api/me");
+  ok("P0: /api/me — raw-секретов нет, keys_masked замаскированы",
+    p0Me.status === 200 &&
+    !/machine_secret|bot_token|telegram_bot_token/i.test(JSON.stringify(p0Me.data)) &&
+    (!p0Me.data.profile || !p0Me.data.profile.keys_masked ||
+      Object.values(p0Me.data.profile.keys_masked).every(
+        v => typeof v === "string" && v.length <= 16)));
+  const p0TgSt = await apiRaw("/api/tg/link/status");
+  ok("P0: /api/tg/link/status — токен бота не в ответе",
+    p0TgSt.status === 200 &&
+    !/bot_token|"token"/i.test(JSON.stringify(p0TgSt.data)));
+  ok("P0: настройки digest — toggle «Реальная модель (LLM)» присутствует",
+    await page.$("#dg-llm-sw"));
+
   ok("нет ошибок JS в консоли", consoleErrors.length === 0);
   ok("нет ответов 4xx/5xx", badResponses.length === 0);
 

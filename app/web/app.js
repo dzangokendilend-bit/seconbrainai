@@ -3088,6 +3088,9 @@ function setTabModules(p) {
   const prefs = (p.onboarding || {}).prefs || {};
   const dgOn = !!prefs.digest_enabled;
   const dgTime = prefs.digest_time || "03:00";
+  /* P0: digest_llm_enabled (default false) — реальная LLM-модель для
+     digest только по явному согласию; иначе структурный режим без трат */
+  const dgLlm = !!prefs.digest_llm_enabled;
   $("s-body").innerHTML =
     '<div class="cs-menu"><div class="cs-menu-h">Модули</div>' +
     Object.keys(modName).map(k =>
@@ -3098,6 +3101,8 @@ function setTabModules(p) {
     '<div style="padding:8px 12px 12px">' +
     '<button class="cs-menu-row" id="dg-toggle"><span>Включён</span>' +
     '<span class="cs-sw' + (dgOn ? " on" : "") + '" id="dg-sw"></span></button>' +
+    '<button class="cs-menu-row" id="dg-llm-toggle" title="Пока выключено, digest строится структурно и не тратит токены LLM"><span>Реальная модель (LLM)</span>' +
+    '<span class="cs-sw' + (dgLlm ? " on" : "") + '" id="dg-llm-sw"></span></button>' +
     '<div class="mrow" style="padding:8px 0"><label style="margin:0">Время</label>' +
     '<input class="minput" type="time" id="dg-time" value="' + esc(dgTime) + '" style="margin:0;width:auto">' +
     '<button class="cs-act primary" id="dg-save">Сохранить</button></div>' +
@@ -3122,6 +3127,16 @@ function setTabModules(p) {
     if (r.data.error) return setFail(r.data.error);
     ME.onboarding.prefs.digest_enabled = r.data.digest_enabled;
     setOk(r.data.digest_enabled ? "ночной digest включён" : "ночной digest выключен");
+    tabSet(ME);
+  };
+  /* P0: toggle реальной LLM-модели для digest (по умолчанию выключена) */
+  $("dg-llm-toggle").onclick = async () => {
+    const r = await api("/api/prefs/digest", {llm_enabled: !dgLlm});
+    if (r.data.error) return setFail(r.data.error);
+    ME.onboarding.prefs.digest_llm_enabled = r.data.digest_llm_enabled;
+    setOk(r.data.digest_llm_enabled
+      ? "digest будет использовать реальную модель (тратит токены)"
+      : "digest работает структурно — токены LLM не тратятся");
     tabSet(ME);
   };
   $("dg-save").onclick = async () => {

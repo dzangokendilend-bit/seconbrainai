@@ -99,7 +99,8 @@ ui_smoke 162/162.
 | 6-F | хвосты 5-I | кликабельность @sozrelyy (e4d33e9 + smoke-проверка), отступы — закрыто попутными фиксами | app.js, monica.css | ✅ |
 | **A** | **Фундамент безопасности и бюджетов** (новый этап) | budget.py (дневной лимит, lock-резерв, сброс в полночь), audit.py (audit.jsonl, маскирование), rate limits, ping()-состояния, UI «Лимиты и использование» | app/budget.py (новый), app/audit.py (новый), providers.py, server.py, app.js, monica.css | ✅ |
 | 7 | боевой режим | инструменты готовы: tools/import_vault.py (импорт .md с --enqueue/--overwrite), tools/cleanup_users.py (чистка тестеров, dry-run + --delete). Живые модели: переключение mock_llm=false — делает автор при наличии ключей (smoke рассчитан на mock) | config.json, tools/ | ◐ |
-| 8 | деплой | инструменты готовы (8-prep): tools/backup.py (zip data/ + ротация --keep), HTTPS-опция в server.py (config.json → "ssl": {"cert","key"}), start_monica.bat + install_autostart.bat (schtasks). Осталось за автором: хостинг/проброс порта, сертификат | tools/, server.py, config.example.json | ◐ |
+| **P0** | **Production Readiness** | единый слой секретов (.env + env override, .env.example, startup report), MONICA_DATA_DIR + tools/migrate_data.py, tools/backup_restore.py (manifest+sha256, restore в новую директорию), digest_llm_enabled toggle, Docker (Dockerfile non-root, compose, healthcheck), tools/doctor.py, docs/backup-restore.md + docs/deploy.md, tools/p0_tests.py | config.py, server.py, jobs.py, providers.py, tools/, docs/, Dockerfile, compose.yaml | ✅ |
+| 8 | деплой | инструменты готовы (8-prep + P0): tools/backup_restore.py (manifest+checksum), Docker/compose, docs/deploy.md. Осталось за автором: .env с реальными секретами, хостинг/HTTPS-прокси, выбор транспорта Telegram | tools/, server.py, config.example.json | ◐ |
 | 9 | полировка по фидбеку беты | темы, i18n, экспорт заметок, аналитика-визуализации | — | ☐ |
 
 ### Фаза 5 — «улучшения и Терминал 2.0» (завершена)

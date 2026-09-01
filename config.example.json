@@ -1,12 +1,9 @@
 {
   "host": "127.0.0.1",
   "port": 8900,
-  "machine_secret": "GENERATE_hex64",
   "session_ttl_hours": 12,
   "mock_llm": true,
-  "telegram_bot_token": "",
   "telegram_bot_username": "",
-  "telegram_webhook_secret": "",
   "public_app_url": "",
   "telegram_link_ttl_seconds": 600,
   "telegram_link_rate_limit": 5,
@@ -18,19 +15,11 @@
     },
     "smart": {
       "base_url": "https://openrouter.ai/api/v1/chat/completions",
-      "model": "openrouter/auto"
+      "model": "openrouter/glm-5.3-fast"
     },
     "luna": {
       "base_url": "https://api.openai.com/v1/chat/completions",
       "model": "gpt-5.6-luna"
-    },
-    "groq": {
-      "base_url": "https://api.groq.com/openai/v1/chat/completions",
-      "model": "llama-3.1-8b-instant"
     }
-  },
-  "ssl": {
-    "cert": "",
-    "key": ""
   }
 }

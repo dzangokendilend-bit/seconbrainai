@@ -1,0 +1,24 @@
+# .dockerignore — в образ НЕ попадают секреты и mutable-данные.
+# Документация и планы не нужны внутри контейнера.
+.env
+config.json
+data/
+backups/
+tmp/
+node_modules/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+docs/
+plans/
+*.md
+*.zip
+*.png
+package.json
+package-lock.json
+start_monica.bat
+tools/*.bat
+tools/ui_*.js
+tools/ui_*.png
+tools/second-brain/

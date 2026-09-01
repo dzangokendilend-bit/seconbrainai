@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""tools/backup.py — бэкап data/ Моники (Фаза 8-prep).
+"""tools/backup.py — простой бэкап data/ Моники (Фаза 8-prep).
 
-Делает zip-архив каталога data/ (пользователи, сессии, вики-очередь, история)
-в backups/ с меткой времени. Ротация: хранит последние --keep архивов.
+P0: пути уважают MONICA_DATA_DIR; для backup с manifest.json и sha256
+используй tools/backup_restore.py (рекомендуется).
 
 Использование:
     python tools/backup.py                # бэкап + ротация (хранить 14)
@@ -16,8 +16,11 @@ import time
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(ROOT, "data")
-BACKUP_DIR = os.path.join(ROOT, "backups")
+sys.path.insert(0, os.path.join(ROOT, "app"))
+import config  # noqa: E402
+
+DATA_DIR = config.DATA_DIR
+BACKUP_DIR = config.BACKUP_DIR
 
 
 def collect_files():
