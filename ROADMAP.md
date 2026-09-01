@@ -33,6 +33,45 @@
 
 ## 2. Где мы сейчас
 
+Этап AI2 «диагностика и исправление реальных пользовательских проблем»
+(AI2_PLAN.md — план + acceptance ledger; юниты tools/ai2_tests.py 19/19,
+ai1_tests 35/35, smoke 200/200 ×3 прогона):
+
+- **Luna-чат исправлен** (P2): live-диагностика показала — endpoint один и тот
+  же (build_url), но gpt-5.6-luna отклоняет `temperature` (HTTP 400
+  "unsupported parameter"), а http_error_to_code ложно маппил 400 →
+  PROVIDER_ENDPOINT_NOT_FOUND. Фикс: model_registry luna `no_temperature: True`,
+  providers._chat_payload учитывает флаг; 400 с unsupported/unknown/invalid
+  parameter → новый безопасный код PROVIDER_BAD_REQUEST. Реальные чаты GLM и
+  Luna через POST /api/chat и /api/chat/stream — 200, model=model_id корректен.
+- **Состояния ключей** (P3): /api/me возвращает keys_overview
+  {key_configured, key_source (env|encrypted_store|none), connection_status
+  (unknown|working|error), checked_at, error_code}; /api/ai/check и
+  /api/profile/key-check сохраняют код/checked_at в keys_status; UI показывает
+  4 состояния («Ключ не настроен» / «Подключение ещё не проверялось» /
+  «Подключение работает» / «Провайдер отклонил ключ») — env/enc-ключ больше не
+  «не настроен».
+- **Терминальный чат** (P4/P5/P6): user message добавляется ДО запроса;
+  typing-элемент («Думаю…») полностью убирается при завершении/ошибке;
+  статусы-фразы «Изучаю сеть для этого запроса…»/«Читаю хранилище…»/«Формирую
+  ответ…»; user message + статусы + ответ привязаны к run_id (генерит UI,
+  сервер эхо-ит в /api/chat, /api/chat/stream X-Run-Id, /api/terminal,
+  /api/terminal/execute); терминальный чат переживает перезагрузку
+  (localStorage monica_termlog_<uid>).
+- **История действий** (P6): клик по системному сообщению терминала → pop-up
+  .runlog с хронологией текущего run_id (timestamp/тип/безопасное описание),
+  события run_started/status/file_read/file_created/answer/run_finished/
+  run_failed.
+- **Создание файлов с read-back** (P7): /api/terminal/execute после записи
+  проверяет exists + чтение обратно (сравнение содержимого) → files
+  [{path,size,verified}], события file_created; если файл не подтвердился —
+  ok:false (не success); проверено live: «заметки/Календарь октябрь 2026.md»
+  создана, verified=true, читается после перезапуска сервера, видна в дереве.
+- **Бюджет** (P8): юнит-тесты до/после — ошибка (reserve→release) не списывает
+  light; успех списывает фактические токены одним commit.
+- smoke: +6 AI2-проверок (keys_overview без секретов, run-функции, статусы,
+  runlog-панель) — 200/200, три прогона подряд зелёные.
+
 Этап AI1 «Пересборка логики ИИ-провайдеров»: app/model_registry.py
 (MODEL_REGISTRY — единственный источник правды, ровно 3 модели:
 glm-fast → OpenRouter `z-ai/glm-5.3-flash` (primary: чат/терминал/вики/digest),

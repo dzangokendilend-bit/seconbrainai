@@ -1459,6 +1459,46 @@ const consoleErrors = [], badResponses = [];
     dgRows >= 1);
   await page.screenshot({path: path.join(__dirname, "ui_last.png")});
 
+  /* ── AI2: ключи/run_id/статусы/история действий (P3-P6) ── */
+  const ai2Me = await apiRaw("/api/me");
+  const ai2Ov = (ai2Me.data && ai2Me.data.profile &&
+    ai2Me.data.profile.keys_overview) || null;
+  ok("AI2 P3: /api/me возвращает keys_overview для всех провайдеров",
+    !!ai2Ov && ["openrouter", "openai", "groq"].every(p => ai2Ov[p] &&
+      typeof ai2Ov[p].key_configured === "boolean" &&
+      ["env", "encrypted_store", "none"].includes(ai2Ov[p].key_source) &&
+      ["unknown", "working", "error"].includes(ai2Ov[p].connection_status)));
+  ok("AI2 P3: keys_overview не содержит значений ключей",
+    !JSON.stringify(ai2Me.data).includes("sk-or-") &&
+    !/"key_value"|api_key/i.test(JSON.stringify(ai2Ov || {})));
+  ok("AI2 P4/P6: run-функции терминала/чата определены",
+    await page.evaluate(() =>
+      typeof genRunId === "function" && typeof showRunLog === "function" &&
+      typeof runLog === "function" && typeof termLogSave === "function"));
+  ok("AI2 P5: динамические статусы агента (фразы вместо «Думаю…»)",
+    await page.evaluate(() =>
+      THINK.term.includes("Изучаю сеть для этого запроса…") &&
+      THINK.term.includes("Читаю хранилище…") &&
+      THINK.term.includes("Формирую ответ…")));
+  ok("AI2 P6: клик/вызов showRunLog → панель истории действий (run_id scope)",
+    await page.evaluate(() => {
+      RUN = {id: "ai2-smoke-run", events: [
+        {ts: "2026-09-01T12:00:00Z", type: "run_started", text: "тест"},
+        {ts: "2026-09-01T12:00:01Z", type: "file_created",
+         text: "создан файл x.md", path: "x.md", size: 5}]};
+      showRunLog();
+      return !!document.querySelector(".runlog .rl-row");
+    }));
+  ok("AI2 P6: в истории показан run_id и события, секретов нет",
+    await page.evaluate(() => {
+      const el = document.querySelector(".runlog");
+      const okRun = el && el.textContent.includes("ai2-smok");
+      const row = document.querySelector(".runlog .rl-row");
+      const ovs = document.querySelectorAll(".modal-ov");
+      ovs.forEach(o => o.remove());
+      return okRun && !!row && !/sk-|Bearer/i.test(row.textContent);
+    }));
+
   /* ── P0: секреты не утекают в API, health минимален, digest-LLM toggle ── */
   const p0Health = await apiRaw("/health");
   ok("P0: /health — {status: ok} без чувствительных данных",

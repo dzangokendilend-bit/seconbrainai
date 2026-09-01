@@ -27,6 +27,11 @@ MODELS = {
         # + ping: ключ принят; новым моделям OpenAI нужен max_completion_tokens
         "model_id": "gpt-5.6-luna",
         "env_key": "OPENAI_API_KEY", "enabled": True,
+        # AI2 live-диагностика (2026-09-01): gpt-5.6-luna на /chat/completions
+        # отклоняет temperature (HTTP 400 "unsupported parameter: temperature");
+        # без temperature и с max_completion_tokens — 200. Endpoint менять
+        # НЕ нужно (/v1/responses не требуется) — только payload.
+        "no_temperature": True,
     },
     "groq-whisper": {
         "provider": "groq", "kind": "transcription",
@@ -55,6 +60,9 @@ ERROR_MESSAGES = {
     "PROVIDER_TIMEOUT": "Провайдер не ответил вовремя. Попробуй ещё раз",
     "PROVIDER_NETWORK_ERROR": "Сеть недоступна или провайдер не отвечает",
     "MODEL_NOT_ALLOWED": "Эта модель пока недоступна в закрытом тестировании",
+    # AI2: провайдер отклонил параметры запроса (например unsupported parameter)
+    # — раньше такой 400 ложно показывался как PROVIDER_ENDPOINT_NOT_FOUND
+    "PROVIDER_BAD_REQUEST": "Провайдер отклонил параметры запроса — модель не поддерживает такую настройку",
 }
 
 
@@ -127,6 +135,10 @@ def http_error_to_code(status, body=""):
             return "PROVIDER_BILLING_REQUIRED"
         if "model" in low and ("not found" in low or "does not exist" in low):
             return "MODEL_NOT_FOUND"
+        # AI2: отклонённые параметры запроса — не «endpoint не найден»
+        if ("unsupported parameter" in low or "unknown parameter" in low
+                or "invalid parameter" in low or "unrecognized" in low):
+            return "PROVIDER_BAD_REQUEST"
         return "PROVIDER_ENDPOINT_NOT_FOUND"
     if status and status >= 500:
         return "PROVIDER_NETWORK_ERROR"

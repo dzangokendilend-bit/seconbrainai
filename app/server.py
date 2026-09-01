@@ -329,6 +329,81 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError:
                     pass
 
+    # ── AI2 (P3): единое состояние API-ключей для UI ──
+
+    def _keys_overview(self, uid, profile):
+        """{prov: {key_configured, key_source, connection_status, checked_at,
+        error_code}} — источник данных: keys.enc + env-fallback + keys_status
+        (заполняется /api/ai/check и /api/profile/key-check). Значения ключей
+        НЕ возвращаются."""
+        try:
+            user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
+        except Exception:
+            user_keys = {}
+        kstat = profile.get("keys_status", {}) or {}
+        out = {}
+        for prov in model_registry.PROVIDERS:
+            stored = (user_keys.get(prov) or "").strip()
+            src = providers.key_source(stored, prov)
+            st = kstat.get(prov) or {}
+            status = st.get("status")
+            if status == "ok":
+                conn = "working"
+            elif status:
+                conn = "error"
+            else:
+                conn = "unknown"
+            out[prov] = {
+                "key_configured": src != "none",
+                "key_source": src,
+                "connection_status": conn,
+                "checked_at": st.get("checked_at"),
+                "error_code": None if conn != "error" else st.get("code"),
+            }
+        return out
+
+    # ── AI2 (P7): read-back verification записанных файлов ──
+
+    def _verify_writes(self, vault, ops):
+        """После term.execute: для каждой create/edit — exists-проверка и
+        чтение обратно (сравнение с содержимым из op). Возвращает
+        (files, events, failed_path). failed_path — первый путь, запись
+        которого не подтвердилась (None — всё ок)."""
+        files, events, failed = [], [], None
+        for op in ops:
+            if op.get("op") not in ("create_note", "edit_note"):
+                continue
+            rel = op.get("path") or ""
+            try:
+                full, rel = term.safe_path(vault, rel, for_write=True)
+            except ValueError:
+                files.append({"op": op["op"], "path": rel,
+                              "verified": False, "size": 0})
+                failed = failed or rel
+                continue
+            ok = False
+            size = 0
+            if os.path.exists(full) and os.path.isfile(full):
+                size = os.path.getsize(full)
+                try:
+                    with open(full, encoding="utf-8") as f:
+                        back = f.read()
+                    ok = (back == (op.get("content") or ""))
+                except (OSError, UnicodeDecodeError):
+                    ok = False
+            files.append({"op": op["op"], "path": rel,
+                          "verified": ok, "size": size})
+            if ok:
+                # AI2 (P5/P7): безопасное событие для журнала действий
+                events.append({"type": "file_created" if op["op"] == "create_note"
+                               else "status",
+                               "text": ("создан файл " if op["op"] == "create_note"
+                                        else "сохранён файл ") + rel,
+                               "path": rel, "size": size})
+            else:
+                failed = failed or rel
+        return files, events, failed
+
     # ── служебное: чтение .md для вики (общий safe_path с Терминалом) ──
 
     def _wiki_read(self, body=None):
@@ -388,7 +463,10 @@ class Handler(BaseHTTPRequestHandler):
                 "modules": p.get("modules", {}),
                 "onboarding": p.get("onboarding", {}),
                 "keys_masked": masked,
-                "keys_status": p.get("keys_status", {})}})
+                "keys_status": p.get("keys_status", {}),
+                # AI2 (P3): единое состояние ключей — ключ из keys.enc ИЛИ env-
+                # fallback больше не показывается как «не настроен»
+                "keys_overview": self._keys_overview(uid, p)}})
             return
         if path.startswith("/api/avatar/"):
             uid = path.split("/")[-1]
@@ -802,7 +880,11 @@ class Handler(BaseHTTPRequestHandler):
             # запросом (OpenRouter/OpenAI: max_tokens=1 «ping»; Groq: GET /models).
             # Не тратит заметки/историю; неудача одного не ломает остальные;
             # в ответе только человеческие статусы (без ключей/headers/тел).
+            # AI2 (P3): результат сохраняется в keys_status — UI больше не
+            # показывает «ключ не настроен» при env-fallback ключе.
             user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
+            p = auth.load_profile(uid)
+            st = p.setdefault("keys_status", {})
             results = {}
             for prov in model_registry.PROVIDERS:
                 key = providers.resolve_key(user_keys.get(prov), prov)
@@ -810,8 +892,14 @@ class Handler(BaseHTTPRequestHandler):
                 results[prov] = {"ok": res.get("status") == "ok",
                                  "status": res.get("status"),
                                  "message": res.get("detail")}
+                st[prov] = {"status": res.get("status"),
+                            "ok": res.get("status") == "ok",
+                            "message": res.get("detail"),
+                            "code": res.get("code"),
+                            "checked_at": time.strftime("%Y-%m-%d %H:%M")}
+            auth.save_profile(uid, p)
             audit.log(uid, "ai_check",
-                      ok=",".join(p for p, r in results.items() if r["ok"]))
+                      ok=",".join(pr for pr, r in results.items() if r["ok"]))
             self._json({"ok": True, "providers": results})
             return
 
@@ -971,7 +1059,10 @@ class Handler(BaseHTTPRequestHandler):
             if not total:
                 total = max(1, len(str(reply)) // 4)
             budget.commit(uid, total, kind="light", est=est)
-            self._json({"reply": reply, "model": model_key, "media_notes": media_notes})
+            # AI2 (P4): run_id связывает user message, статусы и ответ
+            self._json({"reply": reply, "model": model_key,
+                        "media_notes": media_notes,
+                        "run_id": body.get("run_id") or ""})
             return
 
         if path == "/api/chat/stream":
@@ -1010,6 +1101,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
+            # AI2 (P4): run_id связывает user message, статусы и ответ в UI
+            self.send_header("X-Run-Id", str(body.get("run_id") or "")[:64])
             self.end_headers()
             usage_out = {}
             sent = 0
@@ -1083,7 +1176,8 @@ class Handler(BaseHTTPRequestHandler):
             for e in errs:
                 reply += chr(10) + "⚠️ " + e
             self._json({"reply": reply, "ops": clean,
-                        "note": "подтверди выполнение операций" if clean else None})
+                        "note": "подтверди выполнение операций" if clean else None,
+                        "run_id": body.get("run_id") or ""})
             return
 
         if path == "/api/terminal/execute":
@@ -1101,8 +1195,23 @@ class Handler(BaseHTTPRequestHandler):
                 hist.record(hp, rec)
                 if rec.get("op") == "create_note":
                     mon_mods.enqueue(auth.user_dir(uid), rec["path"])
-            audit.log(uid, "vault_write", count=len(clean))
-            self._json({"results": results})
+            # AI2 (P7): read-back verification — успех только если файл реально
+            # существует и содержимое совпадает с записанным; события
+            # (file_created/status) формируются в _verify_writes
+            files, events, failed = self._verify_writes(vault, clean)
+            audit.log(uid, "vault_write", count=len(clean),
+                      verified=all(f["verified"] for f in files) if files else True)
+            resp = {"results": results, "files": files, "events": events,
+                    "run_id": body.get("run_id") or ""}
+            if failed:
+                # спека AI2: backend НЕ сообщает success, если файл отсутствует
+                resp["ok"] = False
+                resp["error"] = ("запись не подтвердилась: " + failed +
+                                 " — операция не успешна")
+                self._json(resp, 500)
+                return
+            resp["ok"] = True
+            self._json(resp)
             return
 
         if path == "/api/session/archive":

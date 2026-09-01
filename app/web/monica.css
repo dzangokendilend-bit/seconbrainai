@@ -929,3 +929,24 @@ ul.tasklist li.task::before{content:none}
 .tg-evtype{font-weight:600}
 .tg-evres.ok{color:#6be08a}
 .tg-evres.warn{color:#d0a04a}
+
+/* в”Ђв”Ђ AI2 (P6): РёСЃС‚РѕСЂРёСЏ РґРµР№СЃС‚РІРёР№ Р·Р°РїСѓСЃРєР° (СЂР°СЃРєСЂС‹РІР°СЋС‰Р°СЏСЃСЏ РїР°РЅРµР»СЊ) в”Ђв”Ђ */
+.runlog{max-width:640px;width:min(640px,92vw)}
+.runlog h3{display:flex;align-items:baseline;gap:8px;margin:0 0 10px}
+.runlog .rl-body{max-height:46vh;overflow:auto;display:flex;flex-direction:column;gap:4px}
+.runlog .rl-row{display:flex;gap:10px;align-items:baseline;font-size:12.5px;
+  padding:5px 8px;border-radius:8px;background:rgba(255,255,255,.03)}
+.runlog .rl-ts{opacity:.55;font-size:11.5px;flex:none;font-variant-numeric:tabular-nums}
+.runlog .rl-type{flex:none;font-weight:600;font-size:11.5px;text-transform:uppercase;
+  letter-spacing:.4px;color:#8fb4ff}
+.runlog .rl-type.rl-run_started{color:#8fb4ff}
+.runlog .rl-type.rl-file_created{color:#6be08a}
+.runlog .rl-type.rl-file_read{color:#d0a04a}
+.runlog .rl-type.rl-answer{color:#c9b8ff}
+.runlog .rl-type.rl-run_finished{color:#6be08a}
+.runlog .rl-type.rl-run_failed{color:#e06c75}
+.runlog .rl-type.rl-status{color:#8fa0b4}
+/* СЃРёСЃС‚РµРјРЅС‹Рµ СЃРѕРѕР±С‰РµРЅРёСЏ С‚РµСЂРјРёРЅР°Р»Р° РєР»РёРєР°Р±РµР»СЊРЅС‹ вЂ” РѕС‚РєСЂС‹РІР°СЋС‚ РёСЃС‚РѕСЂРёСЋ (P6) */
+#tlog .chat-msg.sysnote{cursor:pointer}
+#tlog .chat-msg.sysnote:hover{filter:brightness(1.15)}
+

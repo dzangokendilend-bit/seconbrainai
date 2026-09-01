@@ -1148,9 +1148,72 @@ function openTab(tab, opts) {
 /* баг-11: контекстные фразы «думаю» — системный стиль, анимация точек */
 const THINK = {
   chat: ["Думаю…", "Ищу информацию в архиве…", "Сверяю факты и связи…", "Перечитываю заметки…"],
-  term: ["Планирую операции…", "Проверяю структуру vault…", "Сверяюсь с белым списком…"],
+  /* AI2 (P5): динамические статусы агента терминала */
+  term: ["Изучаю сеть для этого запроса…", "Читаю хранилище…", "Формирую ответ…"],
   err: ["Перезапускаю запрос…", "Разбираюсь в ошибке…"]
 };
+
+/* ── AI2 (P4/P5/P6): run_id + журнал событий текущего запуска ── */
+function genRunId() {
+  return (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+    : ("r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+}
+let RUN = {id: null, events: []};
+function runLog(type, text, extra) {
+  /* безопасные события: type ∈ run_started/status/file_read/file_created/
+     answer/run_finished/run_failed; тексты без секретов (клиентская часть) */
+  if (!RUN.id) RUN.id = genRunId();
+  const ev = Object.assign({ts: new Date().toISOString(), type: type,
+    text: String(text || "")}, extra || {});
+  RUN.events.push(ev);
+  if (RUN.events.length > 200) RUN.events = RUN.events.slice(-200);
+  return ev;
+}
+function showRunLog() {
+  /* AI2 (P6): pop-up история действий текущего run_id */
+  if (!RUN.id) return;
+  const ov = document.createElement("div");
+  ov.className = "modal-ov";
+  ov.innerHTML = '<div class="modal runlog"><h3>История действий' +
+    '<span class="sub"> run: ' + esc(RUN.id.slice(0, 8)) + "</span></h3>" +
+    '<div class="rl-body">' + (RUN.events.map(e =>
+      '<div class="rl-row"><span class="rl-ts">' + esc(e.ts.slice(11, 19)) +
+      '</span><span class="rl-type rl-' + esc(e.type) + '">' + esc(e.type) +
+      "</span><span>" + esc(e.text) + "</span></div>").join("") ||
+      '<div class="sub">событий пока нет</div>') + "</div>" +
+    '<div class="row"><button class="mbtn" id="rl-close">Закрыть</button></div></div>';
+  document.body.appendChild(ov);
+  ov.querySelector("#rl-close").onclick = () => ov.remove();
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+}
+/* клик по системному сообщению терминала → история действий (P6) */
+function bindSysnoteLog() {
+  const log = $("tlog");
+  if (!log || log.__rlBound) return;
+  log.__rlBound = true;
+  log.addEventListener("click", e => {
+    const m = e.target.closest(".chat-msg.sysnote");
+    if (m && $("tlog")) showRunLog();
+  });
+}
+/* AI2 (P4): терминальный чат переживает перезагрузку (localStorage) */
+function termLogKey() {
+  return "monica_termlog_" + (ME && ME.user_id ? ME.user_id : "anon");
+}
+function termLogSave(role, text) {
+  try {
+    const arr = JSON.parse(localStorage.getItem(termLogKey()) || "[]");
+    arr.push({role: role, text: text, ts: Date.now()});
+    localStorage.setItem(termLogKey(), JSON.stringify(arr.slice(-40)));
+  } catch (e) {}
+}
+function termLogLoad() {
+  try { return JSON.parse(localStorage.getItem(termLogKey()) || "[]"); }
+  catch (e) { return []; }
+}
+function termLogClear() {
+  try { localStorage.removeItem(termLogKey()); } catch (e) {}
+}
 const SUGGESTIONS = ["Что вика знает обо мне?", "Разбери мой последний день",
   "Создай заметку идеи/план на неделю", "Какие у меня открытые вопросы?"];
 let SUG_SHOWN = true;
@@ -1315,6 +1378,13 @@ function addTyping(kind) {
 
 let LAST_MSG = null;
 
+/* AI2 (P5): typing-элемент полностью убирается после завершения/ошибки */
+function dropTyping(tp) {
+  if (!tp) return;
+  try { if (tp.stop) tp.stop(); } catch (e) {}
+  try { if (tp.el && tp.el.isConnected) tp.el.remove(); } catch (e) {}
+}
+
 async function chatTurn(text, files) {
   /* 6-M: вложения читаются в base64 и уходят с сообщением */
   const payloadFiles = [];
@@ -1331,6 +1401,10 @@ async function chatTurn(text, files) {
   }
   const userLabel = text + (payloadFiles.length ?
     "\n📎 " + payloadFiles.map(f => f.name).join(", ") : "");
+  /* AI2 (P4): user message и статусы привязаны к одному run_id */
+  RUN = {id: genRunId(), events: []};
+  runLog("run_started", "отправлено сообщение пользователя");
+  /* 4: user message добавляется ДО network request (уже так; зафиксировано) */
   addMsg("user", userLabel);
   CHAT_HIST.push({role: "user", content: userLabel});
   sessTrack("user", userLabel);
@@ -1340,13 +1414,13 @@ async function chatTurn(text, files) {
     const r = await fetch("/api/chat/stream", {
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({message: text, history: CHAT_HIST.slice(-20),
-        project_instruction: curInstr(),
+        project_instruction: curInstr(), run_id: RUN.id,
         files: payloadFiles.length ? payloadFiles : undefined})});
     if (!r.ok) {
       const e = await r.json().catch(() => ({}));
       throw new Error(e.error || "HTTP " + r.status);
     }
-    tp.stop();
+    dropTyping(tp);
     const b = addMsg("bot", "");
     const reader = r.body.getReader();
     const dec = new TextDecoder();
@@ -1362,8 +1436,11 @@ async function chatTurn(text, files) {
     b.innerHTML = md(acc);
     CHAT_HIST.push({role: "assistant", content: acc});
     sessTrack("assistant", acc);
+    runLog("answer", "получен ответ (" + acc.length + " симв.)");
+    runLog("run_finished", "запрос завершён");
   } catch (e) {
-    tp.stop();
+    dropTyping(tp);
+    runLog("run_failed", "ошибка запроса: " + (e.message || e));
     const b = addMsg("bot", "⚠️ " + (e.message || e));
     b.classList.add("sysnote");
     const rb = document.createElement("button");
@@ -1427,8 +1504,20 @@ function tabTerm(p) {
     "</div>" +
     '<div class="tpane tpane-log"><div class="cs-menu-h">изменения</div><div id="thist" class="thist"></div></div>' +
     "</div>";
-  if (!$("tlog").children.length)
-    addTMsg("bot", "Терминал работает только с твоим vault. Изменения — после подтверждения. Ядро Моники и чужие данные недоступны.");
+  if (!$("tlog").children.length) {
+    /* AI2 (P4): терминальный чат восстанавливается после перезагрузки */
+    const saved = termLogLoad();
+    if (saved.length)
+      saved.forEach(m => {
+        const d = document.createElement("div");
+        d.className = "chat-msg " + m.role;
+        d.textContent = m.text;
+        $("tlog").appendChild(d);
+      });
+    else
+      addTMsg("bot", "Терминал работает только с твоим vault. Изменения — после подтверждения. Ядро Моники и чужие данные недоступны.");
+  }
+  bindSysnoteLog();
   const form = $("tform"), input = $("t-input");
   /* 5-H.3: высота управляется CSS (#t-input / #tbar.tfocus), без JS-конфликта */
   input.addEventListener("focus", () => $("tbar").classList.add("tfocus"));
@@ -1889,7 +1978,7 @@ function undoModal(rec) {
   };
 }
 
-function addTMsg(role, text) {
+function addTMsg(role, text, opts) {
   hideEmpty();
   const log = $("tlog");
   if (!log) return;
@@ -1898,17 +1987,31 @@ function addTMsg(role, text) {
   d.textContent = text;
   log.appendChild(d);
   log.scrollTop = log.scrollHeight;
+  /* AI2 (P4): пользовательские и ответы бота сохраняются для перезагрузки */
+  if (role === "user" || role === "bot") termLogSave(role, text);
+  return d;
 }
 
 async function termTurn(text) {
+  /* AI2 (P4): user message в чате терминала ДО network request,
+     привязан к тому же run_id, что статусы и ответ */
+  RUN = {id: genRunId(), events: []};
+  runLog("run_started", "запрос терминала: " + text.slice(0, 80));
+  addTMsg("user", text);
   const tp = addTyping("term");
   try {
-    const r = await api("/api/terminal", {message: text});
-    tp.stop();
-    if (r.data.error) { addTMsg("bot", "⚠️ " + r.data.error); return; }
+    const r = await api("/api/terminal", {message: text, run_id: RUN.id});
+    dropTyping(tp);
+    if (r.data.error) {
+      runLog("run_failed", "ошибка: " + r.data.error);
+      addTMsg("bot", "⚠️ " + r.data.error).classList.add("sysnote");
+      return;
+    }
     addTMsg("bot", r.data.reply || "…");
+    runLog("answer", "ответ сформирован");
     const ops = r.data.ops || [];
-    if (!ops.length) return;
+    if (!ops.length) { runLog("run_finished", "запрос завершён"); return; }
+    runLog("status", "предложено операций: " + ops.length);
     const box = document.createElement("div");
     box.className = "cs-menu";
     box.innerHTML = '<div class="cs-menu-h">Предложенные операции — подтверди выполнение</div>' +
@@ -1917,15 +2020,28 @@ async function termTurn(text) {
     $("tlog").appendChild(box);
     $("tlog").scrollTop = $("tlog").scrollHeight;
     box.querySelector("#ops-go").onclick = async () => {
-      const r2 = await api("/api/terminal/execute", {ops: ops});
+      /* AI2 (P5): статусы по операциям; file_read/file_created в журнал */
+      ops.filter(o => o.op === "read" || o.op === "list").forEach(o =>
+        runLog("file_read", "чтение " + (o.path || o.to || "…")));
+      ops.filter(o => o.op === "create_note" || o.op === "edit_note").forEach(o =>
+        runLog("status", (o.op === "create_note" ? "создаю файл " : "сохраняю файл ") + (o.path || "")));
+      const r2 = await api("/api/terminal/execute", {ops: ops, run_id: RUN.id});
       addTMsg("bot", r2.data.results ? r2.data.results.join("\n") : ("⚠️ " + r2.data.error));
       box.remove();
+      /* AI2 (P7): события сервера (file_created) → журнал; дерево обновляется */
+      (r2.data.events || []).forEach(ev => runLog(ev.type, ev.text, {path: ev.path}));
+      const bad = (r2.data.files || []).filter(f => !f.verified);
+      if (bad.length) runLog("run_failed", "запись не подтвердилась: " + bad.map(f => f.path).join(", "));
+      else runLog("run_finished", "операции выполнены" +
+        (r2.data.files && r2.data.files.length ? " (" + r2.data.files.length + " файл(ов), verified)" : ""));
       drawTree();
       drawHist();
     };
   } catch (e) {
-    tp.stop();
-    addTMsg("bot", "⚠️ " + e);
+    dropTyping(tp);
+    runLog("run_failed", "ошибка запроса: " + e);
+    const d = addTMsg("bot", "⚠️ " + e);
+    if (d) d.classList.add("sysnote");
   }
 }
 
@@ -2942,39 +3058,37 @@ function setTabProfile(p) {
 function setTabKeys(p) {
   const kmask = p.keys_masked || {};
   const kstat = p.keys_status || {};
+  /* AI2 (P3): единое состояние ключей — keys_overview из /api/me
+     (key_configured учитывает env-fallback; «ключ не настроен» только
+     когда ключа нет НИГДЕ) */
+  const kov = p.keys_overview || {};
+  const ov = s => kov[s] || {
+    key_configured: !!kmask[s], key_source: kmask[s] ? "encrypted_store" : "none",
+    connection_status: (kstat[s] || {}).status === "ok" ? "working"
+      : (kstat[s] ? "error" : "unknown"),
+    checked_at: (kstat[s] || {}).checked_at, error_code: (kstat[s] || {}).code};
   /* Фаза A: расширенные статусы ключей — зелёный ok, жёлтый quota,
      красный invalid/permissions, серый unavailable/network, тусклый «не проверялся» */
   const dot = s => {
-    if (!kmask[s]) return '<span class="kdot none" title="не задан"></span>';
-    const st = kstat[s];
-    if (!st) return '<span class="kdot unknown" title="не проверялся"></span>';
-    const map = {
-      ok: ["ok", "проверен: живой"],
-      quota: ["quota", "квота провайдера исчерпана"],
-      permissions: ["bad", "доступ запрещён"],
-      invalid: ["bad", "ключ неверен"],
-      not_found: ["bad", "модель/endpoint недоступна"],
-      unavailable: ["off", "сервис недоступен"],
-      network: ["off", "сеть недоступна"],
-      missing: ["none", "ключ не задан"]};
-    const key = st.status || (st.ok ? "ok" : "invalid");
-    const m = map[key] || map.invalid;
-    return '<span class="kdot ' + m[0] + '" title="' + m[1] + '"></span>';
+    const o = ov(s);
+    if (!o.key_configured) return '<span class="kdot none" title="не задан"></span>';
+    if (o.connection_status === "working") return '<span class="kdot ok" title="подключение работает"></span>';
+    if (o.connection_status === "error") return '<span class="kdot bad" title="провайдер отклонил ключ"></span>';
+    return '<span class="kdot unknown" title="подключение ещё не проверялось"></span>';
   };
   /* AI1: таблица из 3 моделей реестра (Модель | Назначение | Статус) */
   const REG_ROWS = [
     {id: "glm-fast", name: "GLM 5.3 Fast", use: "умная модель: чат, терминал, вики, digest", prov: "openrouter"},
     {id: "luna", name: "ChatGPT Luna", use: "лёгкая модель: повседневный чат", prov: "openai"},
     {id: "groq-whisper", name: "Groq Whisper", use: "расшифровка голосовых и аудио", prov: "groq"}];
+  /* AI2 (P3): 4 состояния — «Ключ настроен» / «Подключение ещё не
+     проверялось» / «Подключение работает» / «Провайдер отклонил ключ» */
   const regStatus = r => {
-    if (!kmask[r.prov]) return "ключ не настроен";
-    const st = kstat[r.prov];
-    if (!st) return "не проверялась";
-    if (st.ok || st.status === "ok") return "Готова";
-    return {invalid: "ошибка подключения", permissions: "нет доступа",
-            not_found: "модель недоступна", quota: "ошибка подключения",
-            unavailable: "ошибка подключения", network: "ошибка подключения",
-            missing: "ключ не настроен"}[st.status] || "ошибка подключения";
+    const o = ov(r.prov);
+    if (!o.key_configured) return "ключ не настроен";
+    if (o.connection_status === "working") return "Подключение работает";
+    if (o.connection_status === "error") return "Провайдер отклонил ключ";
+    return "Подключение ещё не проверялось";
   };
   $("s-body").innerHTML =
     '<div class="cs-menu"><div class="cs-menu-h">Модели и подключения</div>' +
@@ -3020,6 +3134,16 @@ function setTabKeys(p) {
       (r.data.providers[pr].ok ? "✅ готов" : "⚠️ " + (r.data.providers[pr].message || "недоступен")));
     $("ai-check-out").textContent = parts.join(" · ");
     aiBtn.disabled = false;
+    /* AI2 (P3): после проверки — свежие keys_overview/keys_status из профиля */
+    try {
+      const me = await api("/api/me", {}, "GET");
+      if (me.data && me.data.state === "app") {
+        ME.keys_status = me.data.profile.keys_status;
+        ME.keys_overview = me.data.profile.keys_overview;
+        ME.keys_masked = me.data.profile.keys_masked;
+        tabSet(ME);
+      }
+    } catch (e) { /* перерисовка не критична */ }
   };
   /* Фаза 5-B: секция «Модель по умолчанию» из реестра */
   ensureCFGM().then(c => {

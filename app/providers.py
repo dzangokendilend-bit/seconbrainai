@@ -35,6 +35,17 @@ def resolve_key(user_key, provider):
     return fb or None
 
 
+def key_source(user_key, provider):
+    """AI2 (P3): откуда возьмётся ключ провайдера — без значения ключа.
+    "encrypted_store" — ключ пользователя (keys.enc), "env" — серверный
+    fallback из env/.env, "none" — ключа нет."""
+    if (user_key or "").strip():
+        return "encrypted_store"
+    if model_registry.provider_env_key(provider):
+        return "env"
+    return "none"
+
+
 def _estimate_tokens(messages, extra=""):
     """Mock-режим: оценка ~len(текст)/4 (Фаза A: учёт бюджета)."""
     n = len(extra)
@@ -139,8 +150,13 @@ def _open_stream(url, headers, payload, timeout):
         raise ProviderError(code)
 
 
-def _chat_payload(model_id, messages, stream=False):
-    p = {"model": model_id, "messages": messages, "temperature": 0.6}
+def _chat_payload(m, messages, stream=False):
+    """AI2: параметры payload — по ограничениям модели из реестра.
+    no_temperature=True (gpt-5.6-luna) → temperature не отправляется
+    (live-проверено: OpenAI отклоняет temperature для этой модели)."""
+    p = {"model": m["model_id"], "messages": messages}
+    if not m.get("no_temperature"):
+        p["temperature"] = 0.6
     if stream:
         p["stream"] = True
     return p
@@ -160,7 +176,7 @@ def chat(model_key, api_key, messages, timeout=120, with_usage=False):
         raise ProviderError("API_KEY_MISSING")
     url = model_registry.build_url(model_key)
     data = _post_json(url, _headers_for(m["provider"], api_key),
-                      _chat_payload(m["model_id"], messages), timeout)
+                      _chat_payload(m, messages), timeout)
     try:
         content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError):
@@ -192,7 +208,7 @@ def chat_stream(model_key, api_key, messages, timeout=120, usage_out=None):
         raise ProviderError("API_KEY_MISSING")
     url = model_registry.build_url(model_key)
     r, t0 = _open_stream(url, _headers_for(m["provider"], api_key),
-                         _chat_payload(m["model_id"], messages, stream=True),
+                         _chat_payload(m, messages, stream=True),
                          timeout)
     with r:
         for raw in r:
@@ -222,7 +238,9 @@ def chat_stream(model_key, api_key, messages, timeout=120, usage_out=None):
 
 def _check_chat(provider, api_key, timeout=20):
     """Минимальный ping chat-провайдера: max_tokens=1 «ping». Не тратит
-    заметки/историю. OpenAI-моделям нужен max_completion_tokens."""
+    заметки/историю. OpenAI-моделям нужен max_completion_tokens.
+    AI2: ТОТ ЖЕ model_registry/build_url, что и chat — endpoint не расходится;
+    параметры — только добавки к ping (max_tokens), не противоречащие модели."""
     model_key = "glm-fast" if provider == "openrouter" else "luna"
     m = model_registry.get(model_key)
     payload = {"model": m["model_id"],
@@ -235,9 +253,10 @@ def _check_chat(provider, api_key, timeout=20):
     url = model_registry.build_url(model_key)
     try:
         _post_json(url, _headers_for(provider, api_key), payload, timeout)
-        return {"status": "ok", "detail": "ключ работает"}
+        return {"status": "ok", "detail": "ключ работает", "code": None}
     except ProviderError as e:
-        return {"status": _status_from_code(e.code), "detail": e.message}
+        return {"status": _status_from_code(e.code), "detail": e.message,
+                "code": e.code}
 
 
 def _check_groq(api_key, timeout=20):
@@ -282,14 +301,18 @@ def _status_from_code(code):
 
 def check_provider(provider, api_key, timeout=20):
     """Проверка ОДНОГО провайдера коротким минимальным запросом.
-    Возвращает {status, detail} — человеческие статусы, без ключей/headers."""
+    Возвращает {status, detail, code} — человеческие статусы + безопасный
+    код ошибки, без ключей/headers."""
     if config.CFG.get("mock_llm"):
-        return {"status": "ok", "detail": "mock-режим: ключ не проверялся"}
+        return {"status": "ok", "detail": "mock-режим: ключ не проверялся",
+                "code": None}
     if provider not in model_registry.PROVIDERS:
-        return {"status": "missing", "detail": "неизвестный провайдер"}
+        return {"status": "missing", "detail": "неизвестный провайдер",
+                "code": None}
     if not api_key:
         return {"status": "missing",
-                "detail": model_registry.ERROR_MESSAGES["API_KEY_MISSING"]}
+                "detail": model_registry.ERROR_MESSAGES["API_KEY_MISSING"],
+                "code": "API_KEY_MISSING"}
     if provider == "groq":
         return _check_groq(api_key, timeout)
     return _check_chat(provider, api_key, timeout)
