@@ -33,6 +33,49 @@
 
 ## 2. Где мы сейчас
 
+Этап AI1 «Пересборка логики ИИ-провайдеров»: app/model_registry.py
+(MODEL_REGISTRY — единственный источник правды, ровно 3 модели:
+glm-fast → OpenRouter `z-ai/glm-5.3-flash` (primary: чат/терминал/вики/digest),
+luna → OpenAI `gpt-5.6-luna` (лёгкий чат), groq-whisper → Groq
+`whisper-large-v3-turbo` (только /audio/transcriptions, multipart);
+build_url() — base_url+endpoint ровно один раз, юнит-тесты на точные URL
+без /v1/v1 и двойного /chat/completions; http_error_to_code() — безопасные
+коды API_KEY_MISSING / API_KEY_UNAUTHORIZED / MODEL_ACCESS_DENIED /
+PROVIDER_ENDPOINT_NOT_FOUND / MODEL_NOT_FOUND / PROVIDER_RATE_LIMITED /
+PROVIDER_BILLING_REQUIRED / PROVIDER_TIMEOUT / PROVIDER_NETWORK_ERROR —
+сырой «HTTP Error 404» пользователю больше не показывается), app/ai_log.py
+(MONICA_AI_DEBUG=true → data/audit/ai_debug.jsonl, whitelist полей —
+provider/model/endpoint/status/latency/request_id/usage/error_code, НИКОГДА
+ключи/Authorization/prompt/тела), providers.py (chat/chat_stream — URL и ключ
+из registry, ProviderError; check_provider: OpenRouter/OpenAI — ping
+max_tokens=1, Groq — GET /models; ключи: пользователь (keys.enc) →
+env-fallback СВОЕГО провайдера, GLM_API_KEY не участвует), server.py
+(resolve_model → только allowlist glm-fast/luna, иное → 400
+MODEL_NOT_ALLOWED, default glm-fast; терминал/вики/digest — glm-fast;
+/api/prefs/custom-models — только выбор роли light|smart, произвольный
+api_model убран; /api/ai/check — проверка каждого провайдера ОТДЕЛЬНО,
+неудача одного не ломает остальные; ошибки — {code, message} без секретов),
+onboarding.py (KEY_SERVICES = ровно 3 сервиса openrouter/openai/groq,
+legacy id glm-5.3-fast/orv-auto/orv-claude/gpt-5.6-luna → glm-fast),
+media.py (groq_transcribe через registry, multipart на
+/audio/transcriptions, никогда не через chat), config.py (ENV_LLM_KEYS
+строго OPENROUTER_API_KEY/OPENAI_API_KEY/GROQ_API_KEY, GLM_API_KEY —
+legacy, только startup-warning), config.json/config.example.json
+(providers: {} — legacy-URL из конфига больше не читаются), .env.example
+(3 ключа с комментариями, GLM_API_KEY помечен legacy), UI app.js
+(переключатель чата: «🧠 Умная модель — GLM 5.3 Fast» / «⚡ Лёгкая модель —
+ChatGPT Luna», Whisper в списке чата отсутствует; таблица моделей 3 строки
+со статусами + кнопка «Проверить подключения» → /api/ai/check), тесты:
+tools/ai1_tests.py 35/35 (mock HTTP transport: точные URL, изоляция ключей,
+error-маппинг, отсутствие секретов в ошибках, MODEL_NOT_ALLOWED, mock без
+внешних запросов), ui_smoke 193 проверки — 183/193 (провалы только
+предварительные/экологические: analytics re-auth 403, вики-дерево пустого
+vault, D1 hash на повторном прогоне; на HEAD-коде 181/189 с теми же
+провалами — регрессии AI1 нет). Live-проверено (ключи из .env): OpenRouter
+GET /models + ping `z-ai/glm-5.3-flash` → 200; OpenAI GET /models + ping
+`gpt-5.6-luna` → 200; GROQ_API_KEY не настроен — «не настроен» в
+/api/ai/check.
+
 Фаза D2 «Telegram Control Center + Sticker Memory»: app/tgstickers.py (server-side toggles per link — data/telegram/link_settings.json: remember_stickers_enabled/sticker_reply_enabled/integration_event_logging_enabled, по умолчанию ВЫКЛ, применяются немедленно к входящим update без рестарта, audit telegram_settings_changed; память стикеров data/telegram/stickers.json per link_key — private-only, только от привязанного пользователя, не пересланные, дедуп по telegram_file_unique_id, лимиты 300/привязка и 30 новых/час, cooldown ответа о выключенной функции 1ч, без LLM; журнал data/telegram/integration_events.json — последние 100 событий per user, целиком под toggle event_logging, только техметаданные без текстов/токенов/file_id; test-send — единственная исходящая отправка в D2: активная привязка + enabled стикер + rate limit 10/час, безопасная ошибка без token/body), app/tgbot.py (+link_key в links.json — повторная привязка другого TG-аккаунта НЕ даёт доступа к старой библиотеке, данные остаются у пользователя но неактивны; touch_last_seen для «последней активности»; ветка стикеров в _handle; события linked/unlinked), app/audit.py (+toggle/type в whitelist), server.py (GET/POST /api/tg/settings; GET /api/tg/stickers; POST /api/tg/stickers/{id}|toggle|test-send; DELETE /api/tg/stickers/{id}; GET /api/tg/stickers/{id}/preview — серверный прокси getFile, file_id не попадает в браузер; GET /api/tg/events?filter= — всё с auth+scope+rate limit CRUD), UI: карточка Telegram — статус+активность, «Проверить подключение», toggles с описаниями, блок «Скоро» (9 disabled-заглушек без endpoints), библиотека стикеров (карточки с preview/честным fallback, редактор смысла с валидацией 60/300/вес 0–1, вкл/выкл, удалить с confirm, «Отправить тестом» с confirm), история событий с фильтрами Все/Стикеры/Подключение/Команды/Ошибки; формат каталога адаптирован из Сибериады (stickers.json: дедуп, помнить-и-описывать) без LLM-автоописаний и автоподбора, smoke 185/185 (юнит-скрипт D2 OK 35: toggles default off/cooldown/сохранение по toggle/дедуп/unlinked/group/forwarded/лимиты 300 и 30ч/валидация/изоляция пользователей/disabled test-send/rate limit 10ч/api error без секретов/события+фильтры/D1-команды/без vault) ← HEAD
 
 Фаза D1 «Безопасная привязка Telegram + минимальный TG-MVP»: app/tgbot.py (реворк: один бот на инстанс — токен администратора в config.json с env-override, при отсутствии токена модуль выключен; одноразовый URL-safe linking token — sha256-хеш в data/telegram/link_tokens.json, TTL 600с, attempts ≤5 → аннулирование, новый код инвалидирует старый, rate limit 5/час на uid и IP; привязка через /start только в private chat, conflict detection без перепривязки; allowlist команд /start /help /status /open /unlink + setMyCommands; webhook /api/telegram/webhook/<secret> с константным сравнением + dev polling по явному telegram_dev_polling; дедуп update_id — data/telegram/seen_updates.json, последние 1000; Telegram input — недоверенный, без доступа к vault/моделям), app/audit.py (+log_global, whitelist: event/result/tg_user_hash/error_code), маршруты /api/tg/link/status|start|cancel|unlink (старый /api/tg/setup удалён), UI: Настройки→Интеграции (4-я вкладка) + вкладка «Бот» — карточка Telegram с полным state machine (не настроен/не подключён/ожидание с TTL-таймером и автоопросом 3с/подключён/код истёк/conflict), confirm при отвязке, smoke 162/162 (юнит-скрипт tg-link OK 27 + webhook 403/200/дедуп + bot token не в API/audit)
@@ -125,8 +168,11 @@ plans/6-O3-living-core-concept.md) ✅. Остались: 6-M (медиа), 6-F 
 После каждой подфазы: расширить `tools/ui_smoke.js`, прогнать, коммит, протокол.
 
 ### Фаза 6 — «боевой режим»
-1. **Живые модели**: `mock_llm: false`, проверить реальные ключи GLM/OpenRouter/Luna
-   на всех маршрутах (чат, стриминг, терминал, вики-генератор).
+1. **Живые модели** (AI1 ✅ — routing готов): `mock_llm: false` (уже включено),
+   ключи в .env: OPENROUTER_API_KEY ✅, OPENAI_API_KEY ✅, GROQ_API_KEY ☐.
+   Проверка подключения — кнопка «Проверить подключения» в настройках
+   (/api/ai/check); тестовый запрос — любое сообщение в чате
+   (glm-fast) и переключение на «⚡ Лёгкая» (luna).
 2. **Перенос личного vault Ивана** первым боевым пользователем (скрипт импорта .md в `data/users/<id>/vault`).
 3. **Приглашение друзей-тестеров**: чистка тестовых аккаунтов, свежие сессии.
 

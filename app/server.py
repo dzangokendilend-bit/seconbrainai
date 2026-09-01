@@ -15,12 +15,14 @@ from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ai_log
 import analytics
 import audit
 import auth
 import budget
 import config
 import importer
+import model_registry
 import history as hist
 import jobs
 import keys as keys_mod
@@ -34,23 +36,32 @@ import tgbot
 import tgstickers
 
 COOKIE = "monica_session"
-# Фаза 5-B: карта модель -> сервис генерируется из единого реестра onboarding.MODELS
+# AI1: карта модель -> провайдер из MODEL_REGISTRY (единственный источник правды)
 MODEL_SERVICE = {m["id"]: m["service"] for m in onboarding.MODELS}
 
 
 def resolve_model(uid, kind="light"):
-    """6-M2: chat_kind из prefs решает, какая пара работает в чате.
-    kind: light (повседневный чат) | smart (терминал/хранилище/pro)."""
+    """AI1: возвращает безопасный ключ модели реестра ("glm-fast"/"luna").
+    kind: light (чат) | smart (терминал/вики/digest — всегда primary glm-fast).
+    chat_kind из prefs: «Сложная»→glm-fast, «Лёгкая»→luna. Никаких
+    произвольных model id/endpoint от клиента — только allowlist реестра."""
     p = auth.load_profile(uid)
     prefs = (p.get("onboarding", {}).get("prefs") or {})
     if kind == "light" and prefs.get("chat_kind") == "smart":
-        kind = "smart"
-    cust = prefs.get(kind) or {}
-    if isinstance(cust, dict) and str(cust.get("api_model") or "").strip():
-        svc = cust.get("provider") if cust.get("provider") in onboarding.KEY_SERVICES else "smart"
-        return svc, str(cust["api_model"]).strip()
-    model = onboarding.normalize_model(prefs.get("model"))
-    return (onboarding.service_for(model) or "luna", onboarding.api_model(model) or model)
+        return model_registry.DEFAULT_CHAT
+    if kind == "light":
+        return "luna"
+    return model_registry.DEFAULT_CHAT
+
+
+def _chat_target(uid):
+    """(model_key, api_key) для chat-эндпоинтов. Ключ: пользователя (keys.enc)
+    → fallback env/.env СВОЕГО провайдера. GLM_API_KEY не участвует."""
+    model_key = resolve_model(uid, "light")
+    m = model_registry.chat_model(model_key)
+    user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
+    api_key = providers.resolve_key(user_keys.get(m["provider"]), m["provider"])
+    return model_key, api_key
 
 
 def build_user_content(uid, text, files):
@@ -666,9 +677,10 @@ class Handler(BaseHTTPRequestHandler):
             keys_mod.save_keys(config.MACHINE_SECRET, uid, cur)
             audit.log(uid, "key_save", service=svc, length=len(value))
             resp = {"ok": True, "keys_masked":
-                    {s: keys_mod.mask(k) for s, k in cur.items()}}
+                    {s: keys_mod.mask(k) for s, k in cur.items()
+                     if s in onboarding.KEY_SERVICES}}
             if body.get("check"):
-                res = providers.ping(svc, value)
+                res = providers.check_provider(svc, value)
                 resp["check"] = {"ok": res.get("status") == "ok",
                                  "status": res.get("status"),
                                  "message": res.get("detail")}
@@ -772,17 +784,35 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/prefs/custom-models":
-            # 6-N: правка пары light/smart из настроек (синхронно с онбордингом)
+            # AI1: произвольный ввод моделей убран. Эндпоинт принимает только
+            # выбор роли в чате (light|smart) — allowlist MODEL_REGISTRY.
+            kind = body.get("kind")
+            if kind not in ("light", "smart"):
+                self._json({"error": "kind: light|smart"}, 400)
+                return
             p = auth.load_profile(uid)
             prefs = p.setdefault("onboarding", {}).setdefault("prefs", {})
-            for kind in ("light", "smart"):
-                cust = body.get(kind)
-                if isinstance(cust, dict):
-                    prefs[kind] = {
-                        "provider": cust.get("provider") if cust.get("provider") in onboarding.KEY_SERVICES else prefs.get(kind, {}).get("provider", "glm"),
-                        "api_model": str(cust.get("api_model") or "").strip()[:120]}
+            prefs["chat_kind"] = kind
             auth.save_profile(uid, p)
-            self._json({"ok": True, "light": prefs.get("light"), "smart": prefs.get("smart")})
+            self._json({"ok": True, "kind": kind})
+            return
+
+        if path == "/api/ai/check":
+            # AI1: проверка каждого провайдера ОТДЕЛЬНО коротким минимальным
+            # запросом (OpenRouter/OpenAI: max_tokens=1 «ping»; Groq: GET /models).
+            # Не тратит заметки/историю; неудача одного не ломает остальные;
+            # в ответе только человеческие статусы (без ключей/headers/тел).
+            user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
+            results = {}
+            for prov in model_registry.PROVIDERS:
+                key = providers.resolve_key(user_keys.get(prov), prov)
+                res = providers.check_provider(prov, key)
+                results[prov] = {"ok": res.get("status") == "ok",
+                                 "status": res.get("status"),
+                                 "message": res.get("detail")}
+            audit.log(uid, "ai_check",
+                      ok=",".join(p for p, r in results.items() if r["ok"]))
+            self._json({"ok": True, "providers": results})
             return
 
         if path == "/api/profile/export":
@@ -847,16 +877,18 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/profile/key-check":
-            # Фаза 5-D: проверка живости уже сохранённого ключа
+            # Фаза 5-D: проверка живости уже сохранённого ключа (AI1: по
+            # провайдеру MODEL_REGISTRY, минимальный запрос, без секретов)
             svc = body.get("service")
             if svc not in onboarding.KEY_SERVICES:
                 self._json({"error": "сервис неизвестен"}, 400)
                 return
             user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
-            if not user_keys.get(svc):
+            key = providers.resolve_key(user_keys.get(svc), svc)
+            if not key:
                 self._json({"error": "ключ не задан"}, 400)
                 return
-            res = providers.ping(svc, user_keys[svc])
+            res = providers.check_provider(svc, key)
             ok = res.get("status") == "ok"
             # Фаза A: keys_status хранит {status, checked_at} (расширенные состояния)
             p = auth.load_profile(uid)
@@ -889,12 +921,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "пустое сообщение"}, 400)
                 return
             analytics.track(uid, "chat")  # Фаза B: событие для heatmap
-            service, api_mdl = resolve_model(uid, "light")  # 6-O4: лёгкая модель
-            user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
-            # P0: fallback на серверный ключ из env (клиенту не отдаётся)
-            api_key = providers.resolve_key(user_keys.get(service), service)
+            # AI1: модель только из allowlist реестра (glm-fast/luna)
+            model_key, api_key = _chat_target(uid)
             if not api_key:
-                self._json({"error": "нет ключа для сервиса " + service + " — добавь в настройках"}, 400)
+                self._json(model_registry.safe_error("API_KEY_MISSING"), 400)
                 return
             history = body.get("history") or []
             messages = [{"role": "system", "content": CHAT_SYSTEM}]
@@ -920,11 +950,16 @@ class Handler(BaseHTTPRequestHandler):
                             "budget": budget.status(uid)}, 429)
                 return
             try:
-                reply, usage = providers.chat(service, api_key, api_mdl,
+                reply, usage = providers.chat(model_key, api_key,
                                               messages, with_usage=True)
-            except Exception as e:
+            except providers.ProviderError as e:
                 budget.release(uid, est)
-                self._json({"error": "модель недоступна: " + str(e)}, 502)
+                # AI1: безопасный {code, message} — без сырого HTTP-текста
+                self._json(model_registry.safe_error(e.code), 502)
+                return
+            except Exception:
+                budget.release(uid, est)
+                self._json(model_registry.safe_error("PROVIDER_NETWORK_ERROR"), 502)
                 return
             if config.CFG.get("mock_llm"):
                 # mock возвращает JSON {reply, ops} — для чата берём только текст.
@@ -936,7 +971,7 @@ class Handler(BaseHTTPRequestHandler):
             if not total:
                 total = max(1, len(str(reply)) // 4)
             budget.commit(uid, total, kind="light", est=est)
-            self._json({"reply": reply, "model": api_mdl, "media_notes": media_notes})
+            self._json({"reply": reply, "model": model_key, "media_notes": media_notes})
             return
 
         if path == "/api/chat/stream":
@@ -945,12 +980,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "пустое сообщение"}, 400)
                 return
             analytics.track(uid, "chat")  # Фаза B: событие для heatmap
-            service, api_mdl = resolve_model(uid, "light")  # 6-O4: лёгкая модель
-            user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
-            # P0: fallback на серверный ключ из env (клиенту не отдаётся)
-            api_key = providers.resolve_key(user_keys.get(service), service)
+            # AI1: модель только из allowlist реестра (glm-fast/luna)
+            model_key, api_key = _chat_target(uid)
             if not api_key:
-                self._json({"error": "нет ключа для сервиса " + service + " — добавь в настройках"}, 400)
+                self._json(model_registry.safe_error("API_KEY_MISSING"), 400)
                 return
             history = body.get("history") or []
             messages = [{"role": "system", "content": CHAT_SYSTEM}]
@@ -981,7 +1014,7 @@ class Handler(BaseHTTPRequestHandler):
             usage_out = {}
             sent = 0
             try:
-                for delta in providers.chat_stream(service, api_key, api_mdl,
+                for delta in providers.chat_stream(model_key, api_key,
                                                    messages, usage_out=usage_out):
                     if delta:
                         sent += len(delta)
@@ -989,10 +1022,20 @@ class Handler(BaseHTTPRequestHandler):
                         self.wfile.flush()
                 total = usage_out.get("total_tokens") or max(1, sent // 4)
                 budget.commit(uid, total, kind="light", est=est)
-            except Exception as e:
+            except providers.ProviderError as e:
                 budget.release(uid, est)
                 try:
-                    self.wfile.write(("\n\n⚠️ модель прервалась: " + str(e)).encode("utf-8"))
+                    # AI1: безопасное сообщение вместо сырого «HTTP Error 404»
+                    self.wfile.write(("\n\n⚠️ " + model_registry.ERROR_MESSAGES
+                                      .get(e.code, e.message)).encode("utf-8"))
+                    self.wfile.flush()
+                except Exception:
+                    pass
+            except Exception:
+                budget.release(uid, est)
+                try:
+                    self.wfile.write(("\n\n⚠️ " + model_registry.ERROR_MESSAGES
+                                      ["PROVIDER_NETWORK_ERROR"]).encode("utf-8"))
                     self.wfile.flush()
                 except Exception:
                     pass
@@ -1004,11 +1047,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "пустое сообщение"}, 400)
                 return
             user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
-            svc, api_mdl = resolve_model(uid, "smart")  # 6-O4: сложная модель
-            # P0: fallback на серверный ключ из env (клиенту не отдаётся)
-            term_key = providers.resolve_key(user_keys.get(svc), svc)
+            # AI1: терминал — всегда primary glm-fast (OpenRouter)
+            model_key = resolve_model(uid, "smart")
+            prov = model_registry.get(model_key)["provider"]
+            term_key = providers.resolve_key(user_keys.get(prov), prov)
             if not term_key:
-                self._json({"error": "терминалу нужен ключ сервиса " + svc + " — добавь в настройках"}, 400)
+                self._json(model_registry.safe_error("API_KEY_MISSING"), 400)
                 return
             vault = os.path.join(auth.user_dir(uid), "vault")
             messages = [{"role": "system", "content": term.system_prompt(vault)},
@@ -1020,11 +1064,15 @@ class Handler(BaseHTTPRequestHandler):
                             "budget": budget.status(uid)}, 429)
                 return
             try:
-                raw, usage = providers.chat(svc, term_key, api_mdl,
+                raw, usage = providers.chat(model_key, term_key,
                                             messages, with_usage=True)
-            except Exception as e:
+            except providers.ProviderError as e:
                 budget.release(uid, est)
-                self._json({"error": "модель недоступна: " + str(e)}, 502)
+                self._json(model_registry.safe_error(e.code), 502)
+                return
+            except Exception:
+                budget.release(uid, est)
+                self._json(model_registry.safe_error("PROVIDER_NETWORK_ERROR"), 502)
                 return
             total = (usage or {}).get("total_tokens") if isinstance(usage, dict) else None
             if not total:
@@ -1208,10 +1256,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "модуль Википедия выключен"}, 403)
                 return
             user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
-            # P0: fallback на серверный ключ из env (клиенту не отдаётся)
-            wiki_key = providers.resolve_key(user_keys.get("smart"), "smart")
+            # AI1: вики — primary glm-fast (OpenRouter), ключ env-fallback
+            wiki_key = providers.resolve_key(user_keys.get("openrouter"),
+                                             "openrouter")
             if not wiki_key:
-                self._json({"error": "генерации нужен ключ OpenRouter (smart) — добавь в настройках"}, 400)
+                self._json(model_registry.safe_error("API_KEY_MISSING"), 400)
                 return
             vault = os.path.join(auth.user_dir(uid), "vault")
             udir = auth.user_dir(uid)
@@ -1247,7 +1296,9 @@ class Handler(BaseHTTPRequestHandler):
             vault = os.path.join(auth.user_dir(uid), "vault")
             user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
             try:
-                made = mon_mods.topics(vault, user_keys.get("smart"))
+                # AI1: темы вики — primary glm-fast (ключ пользователя → env)
+                made = mon_mods.topics(vault, providers.resolve_key(
+                    user_keys.get("openrouter"), "openrouter"))
             except Exception as e:
                 self._json({"error": "не удалось собрать темы: " + str(e)}, 500)
                 return

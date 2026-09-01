@@ -99,12 +99,17 @@ TG_DEV_POLLING = str(env("TELEGRAM_DEV_POLLING") or "").lower() in (
     "1", "true", "yes") or bool(CFG.get("telegram_dev_polling", False))
 
 # ── серверные fallback LLM-ключи (env only; НЕ отправляются клиенту) ──
-# Используются, только если у пользователя нет своего ключа сервиса.
+# AI1: ключи строго по провайдерам (MODEL_REGISTRY). GLM_API_KEY — legacy,
+# в routing НЕ участвует (никогда не отправляется не тому провайдеру).
 ENV_LLM_KEYS = {
+    "openrouter": str(env("OPENROUTER_API_KEY") or ""),
+    "openai": str(env("OPENAI_API_KEY") or ""),
+    "groq": str(env("GROQ_API_KEY") or ""),
+    # legacy/deprecated: читается только для startup-warning, не для routing
     "glm": str(env("GLM_API_KEY") or ""),
-    "smart": str(env("OPENROUTER_API_KEY") or ""),
-    "luna": str(env("OPENAI_API_KEY") or ""),
 }
+# legacy-ключи: показываются в startup report как «устаревшие», в routing не идут
+LEGACY_LLM_KEYS = ("glm",)
 
 # ── data directory (P0): MONICA_DATA_DIR или dev-default <проект>/data ──
 DATA_DIR = os.path.abspath(env("MONICA_DATA_DIR")
@@ -167,9 +172,14 @@ def startup_report():
         lines.append("[OK] Mock LLM mode (реальные провайдеры не вызываются)")
     else:
         lines.append("[WARN] Real LLM mode is enabled (mock_llm: false)")
-    present = [s for s, k in ENV_LLM_KEYS.items() if k]
+    present = [s for s, k in ENV_LLM_KEYS.items() if k and s not in LEGACY_LLM_KEYS]
     lines.append("[INFO] Server fallback LLM keys (env): "
                  + (", ".join(present) if present else "нет"))
+    legacy = [s for s in LEGACY_LLM_KEYS if ENV_LLM_KEYS.get(s)]
+    if legacy:
+        lines.append("[WARN] Legacy LLM keys заданы (" + ", ".join(legacy)
+                     + ") — в routing не используются, перенеси в "
+                     "OPENROUTER_API_KEY/OPENAI_API_KEY/GROQ_API_KEY")
     lines.append("[INFO] Data dir: " + DATA_DIR)
     prob = data_dir_problem()
     if prob:

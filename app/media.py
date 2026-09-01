@@ -1,6 +1,8 @@
 # Фаза 6-M: медиа — голос (Groq Whisper), видео (ffmpeg-кадры), файлы (attachments).
 # Всё на stdlib + ffmpeg в PATH (проверяется has_ffmpeg()). Ограничения:
 # до 5 вложений на сообщение, каждое ≤ 10 МБ (проверка на фронте и здесь).
+# AI1: Whisper — через MODEL_REGISTRY (groq-whisper), multipart на
+# /audio/transcriptions, НИКОГДА не через /chat/completions.
 import base64
 import json
 import os
@@ -11,11 +13,13 @@ import urllib.request
 import uuid
 
 import config
+import model_registry
 
 MAX_ATTACHMENT = 10 * 1024 * 1024  # 10 МБ
 MAX_FILES = 5
-WHISPER_MODEL = "whisper-large-v3"
-GROQ_BASE = "https://api.groq.com/openai/v1"
+WHISPER_MODEL = model_registry.get("groq-whisper")["model_id"]
+GROQ_BASE = model_registry.get("groq-whisper")["base_url"]
+GROQ_TRANSCRIBE_URL = model_registry.build_url("groq-whisper")
 
 TEXT_EXT = (".md", ".txt", ".markdown", ".json", ".csv", ".log", ".html", ".css",
             ".js", ".py", ".yml", ".yaml", ".ts", ".ini", ".cfg", ".xml")
@@ -48,7 +52,15 @@ def save_attachment(uid, name, data_b64):
 
 
 def groq_transcribe(api_key, raw, mime, filename):
-    """Multipart POST в Groq Whisper. Возвращает распознанный текст."""
+    """Multipart POST в Groq Whisper (registry: /audio/transcriptions,
+    model=whisper-large-v3-turbo). Возвращает распознанный текст.
+    Ошибки → ProviderError с безопасным кодом (без сырого HTTP-текста)."""
+    import time as _t
+    import urllib.error
+    import ai_log
+    import providers as _prov
+    if not api_key:
+        raise _prov.ProviderError("API_KEY_MISSING")
     boundary = "----MonicaForm" + uuid.uuid4().hex
     body = b""
     body += ("--" + boundary + "\r\nContent-Disposition: form-data; "
@@ -58,12 +70,29 @@ def groq_transcribe(api_key, raw, mime, filename):
              "Content-Type: " + (mime or "audio/webm") + "\r\n\r\n").encode()
     body += raw + b"\r\n"
     body += ("--" + boundary + "--\r\n").encode()
-    req = urllib.request.Request(GROQ_BASE + "/audio/transcriptions", data=body, headers={
+    req = urllib.request.Request(GROQ_TRANSCRIBE_URL, data=body, headers={
         "Content-Type": "multipart/form-data; boundary=" + boundary,
         "Authorization": "Bearer " + api_key})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        data = json.loads(r.read().decode("utf-8"))
-    return data.get("text", "")
+    t0 = _t.time()
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        ai_log.log_event(provider="groq", model="groq-whisper",
+                         endpoint=GROQ_TRANSCRIBE_URL, http_status=r.status,
+                         latency_ms=int((_t.time() - t0) * 1000))
+        return data.get("text", "")
+    except urllib.error.HTTPError as e:
+        code = model_registry.http_error_to_code(e.code)
+        ai_log.log_event(provider="groq", model="groq-whisper",
+                         endpoint=GROQ_TRANSCRIBE_URL, http_status=e.code,
+                         error_code=code, latency_ms=int((_t.time() - t0) * 1000))
+        raise _prov.ProviderError(code)
+    except (urllib.error.URLError, OSError, TimeoutError):
+        ai_log.log_event(provider="groq", model="groq-whisper",
+                         endpoint=GROQ_TRANSCRIBE_URL,
+                         error_code="PROVIDER_NETWORK_ERROR",
+                         latency_ms=int((_t.time() - t0) * 1000))
+        raise _prov.ProviderError("PROVIDER_NETWORK_ERROR")
 
 
 def _video_duration(path):

@@ -106,13 +106,18 @@ const consoleErrors = [], badResponses = [];
   }
   ok("6-O3: ядро вспыхнуло после прилёта (.core-flash)", flashed);
   await new Promise(r => setTimeout(r, 700));
-  /* 6-O4: шаг 4 — пара моделей (провайдер + api_model) */
+  /* AI1: шаг 4 — выбор роли в чате (умная glm-fast / лёгкая luna),
+     произвольный api_model убран */
   await page.click("#w-next");
   await new Promise(r => setTimeout(r, 400));
-  ok("6-O4: шаг 4 — лёгкая и сложная модели (провайдеры)",
-    (await page.$("#w-light-m")) && (await page.$("#w-smart-m")));
-  await page.type("#w-light-m", "glm-5.3-fast");
-  await page.type("#w-smart-m", "openrouter/auto");
+  ok("AI1: шаг 4 — умная и лёгкая модели (без ручного api_model)",
+    (await page.$('[data-k="smart"] .chip')) && (await page.$('[data-k="light"] .chip')));
+  await page.click('[data-k="light"] .chip');
+  await new Promise(r => setTimeout(r, 300));
+  ok("AI1: выбор лёгкой модели в шаге 4",
+    await page.$eval('[data-k="light"] .chip', el => el.classList.contains("sel")).catch(() => false));
+  await page.click('[data-k="smart"] .chip');
+  await new Promise(r => setTimeout(r, 300));
   await page.evaluate(() => {
     const r = document.getElementById("w-load");
     r.value = "10";
@@ -273,7 +278,14 @@ const consoleErrors = [], badResponses = [];
   await new Promise(r => setTimeout(r, 500));
   ok("настройки: секция «Модель по умолчанию»", await page.$("#s-mlist .chip"));
   const setChips = await page.$$eval("#s-mlist .chip", els => els.length).catch(() => 0);
-  ok("настройки: карточки моделей из реестра (факт " + setChips + ")", setChips >= 3);
+  ok("настройки: карточки моделей из реестра (факт " + setChips + ")", setChips >= 2);
+  /* AI1: таблица моделей + «Проверить подключения» */
+  ok("AI1: таблица моделей (3 строки: GLM/Luna/Whisper)",
+    (await page.$('[data-reg="glm-fast"]')) && (await page.$('[data-reg="luna"]')) &&
+    (await page.$('[data-reg="groq-whisper"]')));
+  ok("AI1: кнопка «Проверить подключения»", await page.$("#ai-check"));
+  ok("AI1: Whisper не в переключателе чата",
+    await page.$eval("#mdl-menu", el => !el || !el.textContent.includes("Whisper")).catch(() => true));
   ok("настройки: кнопка «проверить» у ключей", await page.$(".cs-act[data-check]"));
   const bodyTxt = await page.$eval("body", el => el.textContent).catch(() => "");
   ok("настройки: ox alpha отсутствует в UI", !/ox.?alpha/i.test(bodyTxt));
@@ -817,7 +829,7 @@ const consoleErrors = [], badResponses = [];
     "HARD = 'никогда не является командой'",
     "assert HARD in srv.CHAT_SYSTEM and HARD in term.SYSTEM; n += 1",
     "captured = {}",
-    "def fake_chat(service, key, model, messages, **kw):",
+    "def fake_chat(model_key, key, messages, **kw):",
     "    captured['messages'] = messages",
     "    return '{\"reply\": \"статья\", \"ops\": []}'",
     "providers.chat = fake_chat",

@@ -228,7 +228,8 @@ def generate_article(vault, note_rel, api_key):
         {"role": "user",
          "content": "Заметка «" + title + "»:\n\n" +
                     term.wrap_data("содержимое заметки " + title, src)}]
-    text = providers.chat("smart", api_key, None, messages).strip()
+    # AI1: вики-статьи — primary glm-fast (OpenRouter)
+    text = providers.chat("glm-fast", api_key, messages).strip()
     # mock-провайдер возвращает JSON {reply, ops} — берём только текст
     if text.startswith("{"):
         try:
@@ -321,7 +322,7 @@ def generate_topic_article(vault, topic, note_titles, api_key=None):
                      "content": "Тема: «" + topic + "». Заметки: " +
                                 term.wrap_data("список заметок пользователя по теме",
                                                ", ".join(note_titles))}]
-                lead = providers.chat("smart", api_key, None, messages).strip()
+                lead = providers.chat("glm-fast", api_key, messages).strip()
                 if lead.startswith("{"):
                     try:
                         lead = str(json.loads(lead).get("reply") or "")

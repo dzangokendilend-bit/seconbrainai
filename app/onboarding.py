@@ -6,34 +6,33 @@ import re
 
 import auth
 
-# Единый реестр моделей (Фаза 5-B). ox alpha выведена из системы:
-# сервис smart теперь = OpenRouter, конкретные модели выбирает пользователь.
-# api_model — реальный id для запроса к провайдеру; id — внутренний идентификатор.
+# AI1: реестр моделей = MODEL_REGISTRY (app/model_registry.py) — единственный
+# источник правды. Ровно 3 модели: glm-fast (OpenRouter), luna (OpenAI),
+# groq-whisper (Groq, только speech-to-text — в чате не выбирается).
+# Legacy (glm на open.bigmodel.cn, openrouter/auto, orv-claude) — из выбора убраны.
+import model_registry
+
 MODELS = [
-    {"id": "glm-5.3-fast", "name": "GLM 5.3 Fast", "service": "glm",
-     "role": "терминал и быстрые операции", "desc": "быстрая",
-     "api_model": "glm-5.3-fast"},
-    {"id": "orv-auto", "name": "OpenRouter Auto", "service": "smart",
-     "role": "глубокая работа со second-brain", "desc": "глубокая · роутер сам выберет модель",
-     "api_model": "openrouter/auto"},
-    {"id": "orv-claude", "name": "Claude Sonnet (OpenRouter)", "service": "smart",
-     "role": "глубокая работа со second-brain", "desc": "глубокая · аккуратный длинный текст",
-     "api_model": "anthropic/claude-sonnet-4.5"},
-    {"id": "gpt-5.6-luna", "name": "ChatGPT 5.6 Luna", "service": "luna",
-     "role": "Telegram-бот и чат на сайте", "desc": "креативная · живой диалог",
-     "api_model": "gpt-5.6-luna"},
+    {"id": "glm-fast", "name": "GLM 5.3 Fast", "service": "openrouter",
+     "role": "умная модель: чат, терминал, вики, digest", "desc": "основная",
+     "api_model": model_registry.get("glm-fast")["model_id"]},
+    {"id": "luna", "name": "ChatGPT Luna", "service": "openai",
+     "role": "лёгкая модель: повседневный чат", "desc": "быстрая · живой диалог",
+     "api_model": model_registry.get("luna")["model_id"]},
 ]
-DEFAULT_MODEL = "gpt-5.6-luna"
+DEFAULT_MODEL = "glm-fast"
 SOURCES = ["друзья", "TikTok", "Instagram", "другое"]
 PURPOSES = ["личный дневник", "знания", "проекты", "другое"]
 LANGUAGES = ["ru", "ua", "en"]
-KEY_SERVICES = ["glm", "smart", "luna", "groq"]
+# AI1: ровно 3 сервиса ключей (по провайдерам MODEL_REGISTRY)
+KEY_SERVICES = ["openrouter", "openai", "groq"]
 KEY_LABELS = {
-    "glm": ["GLM 5.3 Fast", "терминал и быстрые операции"],
-    "smart": ["OpenRouter", "глубокие модели для second-brain"],
-    "luna": ["ChatGPT 5.6 Luna", "Telegram-бот и чат на сайте"],
-    "groq": ["Groq Whisper", "расшифровка голосовых и аудио (медиа в чате)"],
+    "openrouter": ["OpenRouter (GLM 5.3 Fast)", "главная умная модель — чат, терминал, вики"],
+    "openai": ["OpenAI Platform (ChatGPT Luna)", "лёгкая модель — повседневный чат"],
+    "groq": ["Groq Whisper", "только расшифровка голосовых и аудио (медиа в чате)"],
 }
+# legacy-сервисы старых профилей: ключи сохранены, но в routing не участвуют
+LEGACY_SERVICES = ("glm", "smart", "luna")
 
 
 def service_for(model_id):
@@ -53,15 +52,11 @@ def api_model(model_id):
 
 
 def normalize_model(model_id):
-    """Миграция старых профилей: устаревший id -> ближайшая валидная модель.
-    Старый 'smart' (ox alpha) -> первая модель сервиса smart."""
+    """Миграция старых профилей: устаревший id -> валидная модель AI1.
+    Legacy (glm-5.3-fast, orv-auto, orv-claude, gpt-5.6-luna как id реестра,
+    ox-alpha) -> glm-fast (primary)."""
     if model_id in [m["id"] for m in MODELS]:
         return model_id
-    legacy_service = {"smart": "smart", "ox-alpha": "smart"}.get(model_id)
-    if legacy_service:
-        for m in MODELS:
-            if m["service"] == legacy_service:
-                return m["id"]
     return DEFAULT_MODEL
 
 

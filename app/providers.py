@@ -1,22 +1,37 @@
-# LLM-провайдеры Моники: OpenAI-совместимый протокол, ключи пользователей.
-# Сервисы: glm (терминал/быстрые), smart (OpenRouter, глубокие модели), luna (чат/бот).
-# Базовые URL и id моделей — в config.json (секция providers).
-# mock_llm=true в config.json — тестовый режим без реальных ключей.
-# P0: серверные fallback-ключи из env (config.ENV_LLM_KEYS) — если у
-# пользователя нет своего ключа сервиса; клиенту никогда не отправляются.
+# AI1: LLM-провайдеры Моники через MODEL_REGISTRY (app/model_registry.py).
+# Ровно 3 модели: glm-fast (OpenRouter), luna (OpenAI), groq-whisper (Groq).
+# URL строится из base_url + endpoint РОВНО ОДИН раз (registry.build_url).
+# Ключи: ключ пользователя (keys.enc) → fallback env/.env. GLM_API_KEY —
+# legacy, НЕ используется. mock_llm=true — тестовый режим без внешних запросов.
+# Ошибки → безопасные коды (ProviderError.code), сырой HTTP-текст не показывается.
 import json
+import socket
+import time
+import urllib.error
 import urllib.request
 
+import ai_log
 import config
+import model_registry
 
 
-def resolve_key(user_key, service):
-    """P0: ключ пользователя приоритетнее; иначе серверный fallback из env.
-    Возвращает строку ключа или None (если ключей нет совсем)."""
+class ProviderError(Exception):
+    """Ошибка провайдера с БЕЗОПАСНЫМ кодом (model_registry.ERROR_MESSAGES).
+    .code — код, .message — человеческое сообщение без секретов."""
+
+    def __init__(self, code, message=None):
+        super().__init__(message or model_registry.ERROR_MESSAGES.get(code, code))
+        self.code = code
+        self.message = message or model_registry.ERROR_MESSAGES.get(code, code)
+
+
+def resolve_key(user_key, provider):
+    """Ключ пользователя приоритетнее; иначе серверный fallback из env.
+    Возвращает строку ключа или None. GLM_API_KEY не участвует."""
     k = (user_key or "").strip()
     if k:
         return k
-    fb = (config.ENV_LLM_KEYS.get(service) or "").strip()
+    fb = model_registry.provider_env_key(provider)
     return fb or None
 
 
@@ -32,34 +47,6 @@ def _estimate_tokens(messages, extra=""):
                 if isinstance(part, dict) and part.get("type") == "text":
                     n += len(part.get("text", ""))
     return max(1, n // 4)
-
-
-def chat(service, api_key, model, messages, timeout=120, with_usage=False):
-    """Фаза A: with_usage=True → (content, usage_dict|None) — usage нужен
-    бюджету (budget.commit). Без with_usage поведение прежнее."""
-    if config.CFG.get("mock_llm"):
-        content = mock_chat(messages)
-        usage = {"total_tokens": _estimate_tokens(messages, content)}
-        return (content, usage) if with_usage else content
-    prov = (config.CFG.get("providers") or {}).get(service) or {}
-    base = (prov.get("base_url") or "").rstrip("/")
-    # Фаза 5-B: модель пользователя главнее дефолта из конфига
-    model_id = model or prov.get("model")
-    if not base or not api_key:
-        raise RuntimeError("провайдер " + service + " не настроен: нет base_url или ключа")
-    payload = json.dumps({"model": model_id, "messages": messages,
-                          "temperature": 0.6}).encode("utf-8")
-    req = urllib.request.Request(base + "/chat/completions", data=payload, headers={
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + api_key})
-    if service == "smart":
-        req.add_header("HTTP-Referer", "http://localhost")
-        req.add_header("X-Title", "Monica")
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        data = json.loads(r.read().decode("utf-8"))
-    content = data["choices"][0]["message"]["content"]
-    usage = data.get("usage") if isinstance(data.get("usage"), dict) else None
-    return (content, usage) if with_usage else content
 
 
 def mock_chat(messages):
@@ -82,58 +69,109 @@ def mock_chat(messages):
     return json.dumps({"reply": reply, "ops": ops}, ensure_ascii=False)
 
 
-def ping(service, api_key, timeout=20):
-    """Фаза A: расширенные состояния ключа — минимальный запрос max_tokens=1.
-    Возвращает {status: ok|quota|permissions|unavailable|invalid|network, detail}.
-    Разбор HTTP: 401→invalid, 403→permissions, 429→quota, 5xx/timeout→unavailable."""
-    if config.CFG.get("mock_llm"):
-        return {"status": "ok", "detail": "mock-режим: ключ не проверялся"}
-    prov = (config.CFG.get("providers") or {}).get(service) or {}
-    base = (prov.get("base_url") or "").rstrip("/")
-    model_id = prov.get("model")
-    if not base or not model_id:
-        return {"status": "unavailable", "detail": "провайдер не настроен"}
-    payload = json.dumps({"model": model_id, "messages": [{"role": "user", "content": "ping"}],
-                          "max_tokens": 1}).encode("utf-8")
-    req = urllib.request.Request(base + "/chat/completions", data=payload, headers={
-        "Content-Type": "application/json", "Authorization": "Bearer " + api_key})
-    if service == "smart":
-        req.add_header("HTTP-Referer", "http://localhost")
-        req.add_header("X-Title", "Monica")
+# ── transport (monkeypatchable в тестах; реальный вызов — urllib) ──
+
+def _headers_for(provider, api_key):
+    """Заголовки провайдера. Bearer — только ключ СВОЕГО провайдера."""
+    h = {"Content-Type": "application/json",
+         "Authorization": "Bearer " + api_key}
+    if provider == "openrouter":
+        h["HTTP-Referer"] = "http://localhost"
+        h["X-Title"] = "Monica"
+    return h
+
+
+def _post_json(url, headers, payload, timeout):
+    """POST JSON → parsed dict. HTTPError → ProviderError (безопасный код)."""
+    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
+                                 headers=headers)
+    t0 = time.time()
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            json.loads(r.read().decode("utf-8"))
-        return {"status": "ok", "detail": "ключ работает"}
-    except Exception as e:
-        msg = str(e)
+            data = json.loads(r.read().decode("utf-8"))
+            ai_log.log_event(endpoint=url, http_status=r.status,
+                             latency_ms=int((time.time() - t0) * 1000),
+                             request_id=str(data.get("id") or "")[:64],
+                             usage=data.get("usage") if isinstance(
+                                 data.get("usage"), dict) else None)
+            return data
+    except urllib.error.HTTPError as e:
+        body = ""
         try:
-            body = e.read().decode("utf-8", "replace")[:300]
-            err = json.loads(body).get("error")
-            msg = err.get("message", body) if isinstance(err, dict) else body
+            body = e.read().decode("utf-8", "replace")[:400]
         except Exception:
             pass
-        msg = str(msg)[:200]
-        code = getattr(e, "code", None)
-        if code == 401:
-            return {"status": "invalid", "detail": msg or "ключ неверен"}
-        if code == 403:
-            return {"status": "permissions", "detail": msg or "доступ запрещён"}
-        if code == 429:
-            return {"status": "quota", "detail": msg or "квота провайдера исчерпана"}
-        if code is not None and 500 <= code < 600:
-            return {"status": "unavailable", "detail": msg or "сервис недоступен"}
-        if code is not None:
-            return {"status": "invalid", "detail": msg}
-        # без HTTP-кода — сеть/таймаут
-        return {"status": "network", "detail": msg or "сеть недоступна"}
+        code = model_registry.http_error_to_code(e.code, body)
+        ai_log.log_event(endpoint=url, http_status=e.code,
+                         latency_ms=int((time.time() - t0) * 1000),
+                         error_code=code)
+        raise ProviderError(code)
+    except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as e:
+        code = ("PROVIDER_TIMEOUT" if isinstance(e, (socket.timeout, TimeoutError))
+                else "PROVIDER_NETWORK_ERROR")
+        ai_log.log_event(endpoint=url, error_code=code,
+                         latency_ms=int((time.time() - t0) * 1000))
+        raise ProviderError(code)
 
 
+def _open_stream(url, headers, payload, timeout):
+    """POST JSON со stream=true → response-объект для построчного чтения SSE."""
+    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
+                                 headers=headers)
+    t0 = time.time()
+    try:
+        return urllib.request.urlopen(req, timeout=timeout), t0
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", "replace")[:400]
+        except Exception:
+            pass
+        code = model_registry.http_error_to_code(e.code, body)
+        ai_log.log_event(endpoint=url, http_status=e.code, error_code=code,
+                         latency_ms=int((time.time() - t0) * 1000))
+        raise ProviderError(code)
+    except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as e:
+        code = ("PROVIDER_TIMEOUT" if isinstance(e, (socket.timeout, TimeoutError))
+                else "PROVIDER_NETWORK_ERROR")
+        ai_log.log_event(endpoint=url, error_code=code,
+                         latency_ms=int((time.time() - t0) * 1000))
+        raise ProviderError(code)
 
-def chat_stream(service, api_key, model, messages, timeout=120, usage_out=None):
-    """То же, что chat(), но выдаёт ответ кусочками (генератор).
-    Mock стримит по словам с паузой, реальный провайдер — SSE-дельты.
-    Фаза A: usage_out (dict) наполняется usage.total_tokens из финального
-    SSE-чанка (или оценкой в mock) — для budget.commit."""
+
+def _chat_payload(model_id, messages, stream=False):
+    p = {"model": model_id, "messages": messages, "temperature": 0.6}
+    if stream:
+        p["stream"] = True
+    return p
+
+
+def chat(model_key, api_key, messages, timeout=120, with_usage=False):
+    """AI1: chat через MODEL_REGISTRY. model_key — только "glm-fast"/"luna".
+    with_usage=True → (content, usage_dict|None) — usage нужен бюджету."""
+    if config.CFG.get("mock_llm"):
+        content = mock_chat(messages)
+        usage = {"total_tokens": _estimate_tokens(messages, content)}
+        return (content, usage) if with_usage else content
+    m = model_registry.chat_model(model_key)
+    if not m:
+        raise ProviderError("MODEL_NOT_ALLOWED")
+    if not api_key:
+        raise ProviderError("API_KEY_MISSING")
+    url = model_registry.build_url(model_key)
+    data = _post_json(url, _headers_for(m["provider"], api_key),
+                      _chat_payload(m["model_id"], messages), timeout)
+    try:
+        content = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        raise ProviderError("PROVIDER_NETWORK_ERROR")
+    usage = data.get("usage") if isinstance(data.get("usage"), dict) else None
+    return (content, usage) if with_usage else content
+
+
+def chat_stream(model_key, api_key, messages, timeout=120, usage_out=None):
+    """То же, что chat(), но SSE-дельты. Тот же URL и ключ (registry).
+    usage_out наполняется usage.total_tokens из финального SSE-чанка."""
     import time as _t
     if config.CFG.get("mock_llm"):
         text = mock_chat(messages)
@@ -147,21 +185,16 @@ def chat_stream(service, api_key, model, messages, timeout=120, usage_out=None):
             yield word + " "
             _t.sleep(0.025)
         return
-    prov = (config.CFG.get("providers") or {}).get(service) or {}
-    base = (prov.get("base_url") or "").rstrip("/")
-    # Фаза 5-B: модель пользователя главнее дефолта из конфига
-    model_id = model or prov.get("model")
-    if not base or not api_key:
-        raise RuntimeError("провайдер " + service + " не настроен")
-    payload = json.dumps({"model": model_id, "messages": messages,
-                          "temperature": 0.6, "stream": True}).encode("utf-8")
-    req = urllib.request.Request(base + "/chat/completions", data=payload, headers={
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + api_key})
-    if service == "smart":
-        req.add_header("HTTP-Referer", "http://localhost")
-        req.add_header("X-Title", "Monica")
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    m = model_registry.chat_model(model_key)
+    if not m:
+        raise ProviderError("MODEL_NOT_ALLOWED")
+    if not api_key:
+        raise ProviderError("API_KEY_MISSING")
+    url = model_registry.build_url(model_key)
+    r, t0 = _open_stream(url, _headers_for(m["provider"], api_key),
+                         _chat_payload(m["model_id"], messages, stream=True),
+                         timeout)
+    with r:
         for raw in r:
             line = raw.decode("utf-8", "replace").strip()
             if not line.startswith("data:"):
@@ -181,3 +214,90 @@ def chat_stream(service, api_key, model, messages, timeout=120, usage_out=None):
                 continue
             if delta:
                 yield delta
+    ai_log.log_event(endpoint=url, http_status=getattr(r, "status", None),
+                     latency_ms=int((_t.time() - t0) * 1000))
+
+
+# ── проверки провайдеров (/api/ai/check, /api/keys?check, key-check) ──
+
+def _check_chat(provider, api_key, timeout=20):
+    """Минимальный ping chat-провайдера: max_tokens=1 «ping». Не тратит
+    заметки/историю. OpenAI-моделям нужен max_completion_tokens."""
+    model_key = "glm-fast" if provider == "openrouter" else "luna"
+    m = model_registry.get(model_key)
+    payload = {"model": m["model_id"],
+               "messages": [{"role": "user", "content": "ping"}]}
+    if provider == "openai":
+        # live-проверено: новым моделям OpenAI max_tokens не поддерживается
+        payload["max_completion_tokens"] = 16
+    else:
+        payload["max_tokens"] = 1
+    url = model_registry.build_url(model_key)
+    try:
+        _post_json(url, _headers_for(provider, api_key), payload, timeout)
+        return {"status": "ok", "detail": "ключ работает"}
+    except ProviderError as e:
+        return {"status": _status_from_code(e.code), "detail": e.message}
+
+
+def _check_groq(api_key, timeout=20):
+    """Groq: GET /models — минимальная проверка без расхода токенов."""
+    m = model_registry.get("groq-whisper")
+    url = m["base_url"].rstrip("/") + "/models"
+    req = urllib.request.Request(url, headers={
+        "Authorization": "Bearer " + api_key})
+    t0 = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            json.loads(r.read().decode("utf-8"))
+        ai_log.log_event(provider="groq", endpoint=url, http_status=r.status,
+                         latency_ms=int((time.time() - t0) * 1000))
+        return {"status": "ok", "detail": "ключ работает"}
+    except urllib.error.HTTPError as e:
+        code = model_registry.http_error_to_code(e.code)
+        ai_log.log_event(provider="groq", endpoint=url, http_status=e.code,
+                         error_code=code, latency_ms=int((time.time() - t0) * 1000))
+        return {"status": _status_from_code(code),
+                "detail": model_registry.ERROR_MESSAGES.get(code, code)}
+    except (urllib.error.URLError, socket.timeout, TimeoutError, OSError):
+        ai_log.log_event(provider="groq", endpoint=url,
+                         error_code="PROVIDER_NETWORK_ERROR",
+                         latency_ms=int((time.time() - t0) * 1000))
+        return {"status": "network", "detail": "сеть недоступна"}
+
+
+def _status_from_code(code):
+    return {
+        "API_KEY_MISSING": "missing",
+        "API_KEY_UNAUTHORIZED": "invalid",
+        "MODEL_ACCESS_DENIED": "permissions",
+        "PROVIDER_ENDPOINT_NOT_FOUND": "not_found",
+        "MODEL_NOT_FOUND": "not_found",
+        "PROVIDER_RATE_LIMITED": "quota",
+        "PROVIDER_BILLING_REQUIRED": "quota",
+        "PROVIDER_TIMEOUT": "unavailable",
+        "PROVIDER_NETWORK_ERROR": "network",
+    }.get(code, "unavailable")
+
+
+def check_provider(provider, api_key, timeout=20):
+    """Проверка ОДНОГО провайдера коротким минимальным запросом.
+    Возвращает {status, detail} — человеческие статусы, без ключей/headers."""
+    if config.CFG.get("mock_llm"):
+        return {"status": "ok", "detail": "mock-режим: ключ не проверялся"}
+    if provider not in model_registry.PROVIDERS:
+        return {"status": "missing", "detail": "неизвестный провайдер"}
+    if not api_key:
+        return {"status": "missing",
+                "detail": model_registry.ERROR_MESSAGES["API_KEY_MISSING"]}
+    if provider == "groq":
+        return _check_groq(api_key, timeout)
+    return _check_chat(provider, api_key, timeout)
+
+
+def ping(model_key, api_key, timeout=20):
+    """Совместимость: ping chat-модели (glm-fast/luna) → {status, detail}."""
+    m = model_registry.chat_model(model_key)
+    if not m:
+        return {"status": "not_found", "detail": "неизвестная модель"}
+    return check_provider(m["provider"], api_key, timeout)

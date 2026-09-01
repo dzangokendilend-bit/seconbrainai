@@ -163,16 +163,17 @@ function renderLogin() {
 }
 
 /* ── онбординг: 7 шагов (порядок Ивана) ── */
+/* AI1: онбординг — 3 сервиса ключей (openrouter/openai/groq), модель по
+   умолчанию glm-fast. Произвольные api_model убраны (allowlist реестра). */
 const W = {step: 1, source: "", purpose: "", username: "", language: "ru",
-  model: "gpt-5.6-luna",
-  light: {provider: "glm", api_model: ""},
-  smart: {provider: "smart", api_model: ""},
+  model: "glm-fast",
+  chat_kind: "smart",
   daily_load: 5, avatar: null,
   modules: {wikipedia: true, telegram: false, analytics: false},
-  keys: {glm: "", smart: "", luna: ""}, password: "", hint: ""};
+  keys: {openrouter: "", openai: "", groq: ""}, password: "", hint: ""};
 let CFGM = null;
-/* 6-O4: провайдеры для кастомных моделей + мета языков (флаги) */
-const PROVIDERS = {glm: "GLM", smart: "OpenRouter", luna: "Luna"};
+/* AI1: провайдеры ключей (по MODEL_REGISTRY) + мета языков (флаги) */
+const PROVIDERS = {openrouter: "OpenRouter", openai: "OpenAI", groq: "Groq"};
 const LANG_META = {ru: ["🇷🇺", "Русский"], ua: ["🇺🇦", "Українська"], en: ["🇬🇧", "English"]};
 
 /* ── Фаза 5-B: реестр моделей во фронте ── */
@@ -599,38 +600,29 @@ function renderW() {
       return r.data.ok ? null : (r.data.error || "юзернейм не подходит");
     });
   } else if (W.step === 4) {
-    /* 6-O4: пара «лёгкая + сложная» модель — провайдер + ручной api_model */
+    /* AI1: выбор роли в чате — «Умная» (glm-fast, default) / «Лёгкая» (luna).
+       Произвольный api_model убран: модели фиксированы MODEL_REGISTRY. */
     wz.innerHTML = wHead("Модели") +
-      '<div class="mod2"><div class="modcol"><div class="t">⚡ Лёгкая модель</div>' +
-      '<div class="d">повседневное общение в чате</div>' +
-      '<div class="provrow" data-k="light">' + Object.keys(PROVIDERS).map(p =>
-        '<span class="chip' + (W.light.provider === p ? " sel" : "") + '" data-p="' + p + '">' + PROVIDERS[p] + "</span>").join("") + "</div>" +
-      '<input class="minput" id="w-light-m" placeholder="id модели у провайдера, напр. glm-5.3-fast" value="' + esc(W.light.api_model) + '"></div>' +
-      '<div class="modcol"><div class="t">🧠 Сложная модель</div>' +
-      '<div class="d">хранилище, терминал и режим pro</div>' +
-      '<div class="provrow" data-k="smart">' + Object.keys(PROVIDERS).map(p =>
-        '<span class="chip' + (W.smart.provider === p ? " sel" : "") + '" data-p="' + p + '">' + PROVIDERS[p] + "</span>").join("") + "</div>" +
-      '<input class="minput" id="w-smart-m" placeholder="id модели у провайдера (напр. openrouter/auto)" value="' + esc(W.smart.api_model) + '"></div></div>' +
+      '<div class="mod2"><div class="modcol"><div class="t">🧠 Умная модель</div>' +
+      '<div class="d">GLM 5.3 Fast · чат, терминал, вики · по умолчанию</div>' +
+      '<div class="provrow" data-k="smart">' +
+      '<span class="chip' + (W.chat_kind === "smart" ? " sel" : "") + '" data-p="smart">Выбрана</span></div></div>' +
+      '<div class="modcol"><div class="t">⚡ Лёгкая модель</div>' +
+      '<div class="d">ChatGPT Luna · повседневный чат</div>' +
+      '<div class="provrow" data-k="light">' +
+      '<span class="chip' + (W.chat_kind === "light" ? " sel" : "") + '" data-p="light">Выбрана</span></div></div></div>' +
       '<label>Сколько информации планируешь заносить в день</label>' +
       '<input type="range" id="w-load" min="1" max="10" value="' + W.daily_load + '">' +
       '<div class="sub">нагрузка: <b id="w-lv">' + W.daily_load + "</b>/10</div>" + wNav();
-    ["light", "smart"].forEach(k => {
+    ["smart", "light"].forEach(k => {
       wz.querySelector('[data-k="' + k + '"]').querySelectorAll(".chip").forEach(c =>
-        c.onclick = () => { W[k].provider = c.dataset.p; renderW(); });
+        c.onclick = () => { W.chat_kind = k; renderW(); });
     });
-    $("w-light-m").oninput = () => W.light.api_model = $("w-light-m").value.trim();
-    $("w-smart-m").oninput = () => W.smart.api_model = $("w-smart-m").value.trim();
     $("w-load").oninput = () => {
       W.daily_load = +$("w-load").value; $("w-lv").textContent = W.daily_load;
       setCoreGlow((W.daily_load - 1) / 9); /* 6-O3: свечение = нагрузка */
     };
-    wBind(async () => {
-      W.light.api_model = $("w-light-m").value.trim();
-      W.smart.api_model = $("w-smart-m").value.trim();
-      if (!W.light.api_model) return "впиши id лёгкой модели (например glm-5.3-fast)";
-      if (!W.smart.api_model) return "впиши id сложной модели (напр. openrouter/auto)";
-      return null;
-    });
+    wBind(async () => null);
   } else if (W.step === 5) {
     const names = {wikipedia: ["Википедия", "поиск по твоим заметкам, сводки, выжимки"],
       telegram: ["Telegram-бот", "мысли, голосовые, файлы — прямо в базу"],
@@ -653,11 +645,11 @@ function renderW() {
     });
     wBind(async () => null);
   } else if (W.step === 6) {
-    /* Фаза 5-B: подписи ключей из реестра моделей (без хардкода ox alpha) */
+    /* AI1: подписи ключей из реестра — 3 сервиса (openrouter/openai/groq) */
     const ks = CFGM.key_labels ||
-      {glm: ["GLM 5.3 Fast", "терминал и быстрые операции"],
-       smart: ["OpenRouter", "глубокие модели для second-brain"],
-       luna: ["ChatGPT 5.6 Luna", "Telegram-бот и чат на сайте"]};
+      {openrouter: ["OpenRouter (GLM 5.3 Fast)", "главная умная модель — чат, терминал, вики"],
+       openai: ["OpenAI Platform (ChatGPT Luna)", "лёгкая модель — повседневный чат"],
+       groq: ["Groq Whisper", "только расшифровка голосовых и аудио"]};
     wz.innerHTML = wHead("API-ключи") +
       '<p class="sub">Ключи шифруются, каждый сервис изолирован. В закрытой бете обязательны.</p>' +
       Object.keys(ks).map(k => '<label>' + ks[k][0] + ' — ' + ks[k][1] + '</label>' +
@@ -682,8 +674,8 @@ function renderW() {
       '<label>Пароль (мин. 6 символов)</label><input class="minput" type="password" id="w-pass">' +
       '<label>Подсказка к паролю</label><input class="minput" id="w-hint" value="' + W.hint + '">' +
       '<div class="sum">Юзернейм: <b>' + W.username + '</b><br>Откуда: <b>' + (W.source || "-") +
-      '</b> · модели: <b>' + W.light.provider + "/" + W.light.api_model + " + " +
-      W.smart.provider + "/" + W.smart.api_model + '</b> · нагрузка: <b>' + W.daily_load + '/10</b><br>Модули: <b>' +
+      '</b> · модель в чате: <b>' + (W.chat_kind === "light" ? "⚡ ChatGPT Luna" : "🧠 GLM 5.3 Fast") +
+      '</b> · нагрузка: <b>' + W.daily_load + '/10</b><br>Модули: <b>' +
       Object.keys(W.modules).filter(k => W.modules[k]).join(", ") + '</b><br>Ключи: <b>' +
       Object.keys(W.keys).filter(k => W.keys[k]).join(", ") + "</b></div>" + wNav();
     $("w-hint").oninput = () => W.hint = $("w-hint").value;
@@ -697,7 +689,7 @@ function renderW() {
         username: W.username, password: W.password, hint: W.hint, avatar: W.avatar,
         survey: {source: W.source, purpose: W.purpose},
         prefs: {language: W.language, model: W.model, daily_load: W.daily_load,
-          light: W.light, smart: W.smart},
+          chat_kind: W.chat_kind},
         modules: W.modules, keys: W.keys});
       if (r.data.ok) { wDraftClear(); launchFinale(); return null; }
       return r.data.error || "ошибка сохранения";
@@ -1192,23 +1184,24 @@ function tabChat(p) {
     '<span class="cs-modelwrap"><button type="button" class="cs-modelbtn" id="mdl-btn">' +
     '<span class="dot"></span><span id="mdl-name">…</span> <span class="chev">▾</span></button>' +
     '<div class="cs-modelmenu" id="mdl-menu"></div></span>';
+  /* AI1: ровно два пункта — «Умная» (glm-fast, по умолчанию) и «Лёгкая» (luna).
+     Whisper в списке чата не появляется (kind=transcription). */
   const prefs = (p.onboarding.prefs || {});
-  const lightName = (prefs.light || {}).api_model || "лёгкая";
-  const smartName = (prefs.smart || {}).api_model || "сложная";
   const curKind = prefs.chat_kind === "smart" ? "smart" : "light";
-  $("mdl-name").textContent = (curKind === "smart" ? "🧠 " : "⚡ ") +
-    (curKind === "smart" ? smartName : lightName);
+  $("mdl-name").textContent = curKind === "smart"
+    ? "🧠 Умная модель — GLM 5.3 Fast" : "⚡ Лёгкая модель — ChatGPT Luna";
   $("mdl-menu").innerHTML =
-    '<button type="button" data-k="light"' + (curKind === "light" ? ' class="sel"' : "") + ">" +
-    "⚡ Лёгкая<span class=\"d\">повседневный чат · " + esc(lightName) + "</span></button>" +
     '<button type="button" data-k="smart"' + (curKind === "smart" ? ' class="sel"' : "") + ">" +
-    "🧠 Сложная<span class=\"d\">хранилище и pro · " + esc(smartName) + "</span></button>";
+    "🧠 Умная модель — GLM 5.3 Fast<span class=\"d\">чат, терминал, вики · по умолчанию</span></button>" +
+    '<button type="button" data-k="light"' + (curKind === "light" ? ' class="sel"' : "") + ">" +
+    "⚡ Лёгкая модель — ChatGPT Luna<span class=\"d\">повседневный чат</span></button>";
   $("mdl-menu").querySelectorAll("button").forEach(b => b.onclick = async () => {
     const r = await api("/api/prefs/kind", {kind: b.dataset.k});
     if (!r.data.ok) return;
     $("mdl-menu").classList.remove("open");
     $("mdl-btn").classList.remove("open");
-    $("mdl-name").textContent = b.dataset.k === "smart" ? "🧠 Сложная" : "⚡ Лёгкая";
+    $("mdl-name").textContent = b.dataset.k === "smart"
+      ? "🧠 Умная модель — GLM 5.3 Fast" : "⚡ Лёгкая модель — ChatGPT Luna";
     $("mdl-menu").querySelectorAll("button").forEach(x =>
       x.classList.toggle("sel", x.dataset.k === r.data.kind));
     if (ME.onboarding && ME.onboarding.prefs) ME.onboarding.prefs.chat_kind = r.data.kind;
@@ -2807,7 +2800,8 @@ async function pollImport(job) {
 
 /* ── настройки ×3: Профиль / Модели и ключи / Модули (Фаза 5-D) ── */
 let SET_TAB = "profile";
-const SVC_NAMES = {glm: "GLM 5.3 Fast", smart: "OpenRouter", luna: "ChatGPT 5.6 Luna"};
+/* AI1: ровно 3 сервиса (провайдеры MODEL_REGISTRY) */
+const SVC_NAMES = {openrouter: "OpenRouter (GLM 5.3 Fast)", openai: "OpenAI (ChatGPT Luna)", groq: "Groq Whisper"};
 
 function tabSet(p) {
   const tabs = [["profile", "Профиль"], ["keys", "Модели и ключи"], ["modules", "Модули"], ["integrations", "Интеграции"]];
@@ -2959,28 +2953,39 @@ function setTabKeys(p) {
       quota: ["quota", "квота провайдера исчерпана"],
       permissions: ["bad", "доступ запрещён"],
       invalid: ["bad", "ключ неверен"],
+      not_found: ["bad", "модель/endpoint недоступна"],
       unavailable: ["off", "сервис недоступен"],
-      network: ["off", "сеть недоступна"]};
+      network: ["off", "сеть недоступна"],
+      missing: ["none", "ключ не задан"]};
     const key = st.status || (st.ok ? "ok" : "invalid");
     const m = map[key] || map.invalid;
     return '<span class="kdot ' + m[0] + '" title="' + m[1] + '"></span>';
   };
-  const prefs = (p.onboarding || {}).prefs || {};
-  const lc = prefs.light || {}, sc = prefs.smart || {};
+  /* AI1: таблица из 3 моделей реестра (Модель | Назначение | Статус) */
+  const REG_ROWS = [
+    {id: "glm-fast", name: "GLM 5.3 Fast", use: "умная модель: чат, терминал, вики, digest", prov: "openrouter"},
+    {id: "luna", name: "ChatGPT Luna", use: "лёгкая модель: повседневный чат", prov: "openai"},
+    {id: "groq-whisper", name: "Groq Whisper", use: "расшифровка голосовых и аудио", prov: "groq"}];
+  const regStatus = r => {
+    if (!kmask[r.prov]) return "ключ не настроен";
+    const st = kstat[r.prov];
+    if (!st) return "не проверялась";
+    if (st.ok || st.status === "ok") return "Готова";
+    return {invalid: "ошибка подключения", permissions: "нет доступа",
+            not_found: "модель недоступна", quota: "ошибка подключения",
+            unavailable: "ошибка подключения", network: "ошибка подключения",
+            missing: "ключ не настроен"}[st.status] || "ошибка подключения";
+  };
   $("s-body").innerHTML =
-    '<div class="cs-menu"><div class="cs-menu-h">Пара моделей (из онбординга)</div>' +
-    '<div style="padding:8px 12px 12px">' +
-    '<label>⚡ Лёгкая — повседневный чат</label>' +
-    '<div class="mrow" style="padding:0 0 8px"><select class="minput" id="cm-light-p" style="margin:0;width:auto">' +
-    Object.keys(SVC_NAMES).map(s => '<option value="' + s + '"' +
-      (lc.provider === s ? " selected" : "") + ">" + SVC_NAMES[s] + "</option>").join("") + "</select>" +
-    '<input class="minput" id="cm-light-m" style="margin:0" placeholder="api_model" value="' + esc(lc.api_model || "") + '"></div>' +
-    '<label>🧠 Сложная — хранилище и pro</label>' +
-    '<div class="mrow" style="padding:0 0 8px"><select class="minput" id="cm-smart-p" style="margin:0;width:auto">' +
-    Object.keys(SVC_NAMES).map(s => '<option value="' + s + '"' +
-      (sc.provider === s ? " selected" : "") + ">" + SVC_NAMES[s] + "</option>").join("") + "</select>" +
-    '<input class="minput" id="cm-smart-m" style="margin:0" placeholder="api_model" value="' + esc(sc.api_model || "") + '"></div>' +
-    '<button class="cs-act primary" id="cm-save">Сохранить модели</button></div></div>' +
+    '<div class="cs-menu"><div class="cs-menu-h">Модели и подключения</div>' +
+    '<div style="padding:8px 12px 4px">' +
+    REG_ROWS.map(r =>
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0">' +
+      '<div><b style="font-size:13px">' + esc(r.name) + "</b>" +
+      '<div class="sub" style="margin:0">' + esc(r.use) + "</div></div>" +
+      '<span class="chip" data-reg="' + r.id + '" data-prov="' + r.prov + '">' + esc(regStatus(r)) + "</span></div>").join("") +
+    '<div class="mrow" style="padding:6px 0 10px"><button class="cs-act primary" id="ai-check">Проверить подключения</button>' +
+    '<span class="sub" id="ai-check-out" style="margin:0 0 0 10px"></span></div></div></div>' +
     '<div class="cs-menu"><div class="cs-menu-h">Модель по умолчанию (реестр)</div>' +
     '<div id="s-mlist" style="padding:8px 12px 12px"></div></div>' +
     '<div class="cs-menu"><div class="cs-menu-h">Лимиты и использование</div>' +
@@ -3002,16 +3007,19 @@ function setTabKeys(p) {
     Object.keys(SVC_NAMES).map(s => "<option>" + s + "</option>").join("") + "</select>" +
     '<input class="minput" id="s-val" style="margin:0" placeholder="новое значение ключа">' +
     '<button class="cs-act primary" id="s-apply">Применить</button></div></div>';
-  /* 6-N: сохранение пары моделей */
-  $("cm-save").onclick = async () => {
-    const r = await api("/api/prefs/custom-models", {
-      light: {provider: $("cm-light-p").value, api_model: $("cm-light-m").value.trim()},
-      smart: {provider: $("cm-smart-p").value, api_model: $("cm-smart-m").value.trim()}});
-    if (r.data.ok) {
-      ME.onboarding.prefs.light = r.data.light;
-      ME.onboarding.prefs.smart = r.data.smart;
-      setOk("пара моделей сохранена");
-    } else setFail(r.data.error || "ошибка сохранения");
+  /* AI1: «Проверить подключения» — POST /api/ai/check (каждый провайдер
+     отдельно, короткий минимальный запрос, без ключей/headers в ответе) */
+  const aiBtn = $("ai-check");
+  if (aiBtn) aiBtn.onclick = async () => {
+    aiBtn.disabled = true;
+    $("ai-check-out").textContent = "проверяю…";
+    const r = await api("/api/ai/check", {});
+    if (!r.data || !r.data.providers) { $("ai-check-out").textContent = "ошибка проверки"; aiBtn.disabled = false; return; }
+    const parts = Object.keys(r.data.providers).map(pr =>
+      (SVC_NAMES[pr] || pr).split(" (")[0] + ": " +
+      (r.data.providers[pr].ok ? "✅ готов" : "⚠️ " + (r.data.providers[pr].message || "недоступен")));
+    $("ai-check-out").textContent = parts.join(" · ");
+    aiBtn.disabled = false;
   };
   /* Фаза 5-B: секция «Модель по умолчанию» из реестра */
   ensureCFGM().then(c => {

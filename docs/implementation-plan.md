@@ -4,6 +4,28 @@
 > срезы ценности. После каждого этапа — расширение `tools/ui_smoke.js`,
 > прогон (≥76/76), один логический коммит, обновление ROADMAP.md.
 
+## 0b. Этап AI1 — пересборка логики ИИ-провайдеров (выполнен)
+
+Единственный источник правды — `app/model_registry.py` (MODEL_REGISTRY):
+ровно 3 модели — `glm-fast` (OpenRouter, `z-ai/glm-5.3-flash`, primary:
+чат/терминал/вики/digest), `luna` (OpenAI, `gpt-5.6-luna`, лёгкий чат),
+`groq-whisper` (Groq, `whisper-large-v3-turbo`, только speech-to-text).
+Ключи только из env/.env: OPENROUTER_API_KEY / OPENAI_API_KEY /
+GROQ_API_KEY (GLM_API_KEY — legacy, из routing исключён). Клиент выбирает
+только безопасный ключ `glm-fast`/`luna`; иное → 400 MODEL_NOT_ALLOWED.
+Новые эндпоинты/файлы: `/api/ai/check` (проверка провайдеров по одному),
+`app/ai_log.py` (MONICA_AI_DEBUG → data/audit/ai_debug.jsonl, без секретов),
+`tools/ai1_tests.py` (35/35, mock HTTP transport).
+
+Таблица причин (проверено по коду HEAD ce8a9e0 и live-запросами):
+
+| Проблема | Реальная причина в старом коде | Исправление (AI1) |
+|---|---|---|
+| «⚠️ модель прервалась: HTTP Error 404: Not Found» | config.json задавал base_url УЖЕ с `/chat/completions` (open.bigmodel.cn/api/paas/v4/chat/completions, openrouter.ai/api/v1/chat/completions, api.openai.com/v1/chat/completions), а providers.chat/chat_stream/ping добавляли `/chat/completions` второй раз → `/chat/completions/chat/completions` | MODEL_REGISTRY.build_url(): base_url + endpoint РОВНО ОДИН раз; юнит-тесты на точные URL трёх провайдеров; секция providers в config.json больше не читается (`providers: {}`) |
+| 401 Unauthorized | ключ не того провайдера: имена сервисов в коде (glm/smart/luna) не совпадали с именами env-ключей (GLM_API_KEY/OPENROUTER_API_KEY/OPENAI_API_KEY); ключ, сохранённый при регистрации под одним сервисом, молча заменялся env-ключом другого провайдера; GLM_API_KEY мог уходить не по адресу | строгая привязка ключ → провайдер (OPENROUTER→openrouter, OPENAI→openai, GROQ→groq); пользовательский ключ применяется только к своему провайдеру; GLM_API_KEY исключён из routing (только startup-warning) |
+| сырой текст ошибки в чате | str(HTTPError) писался прямо в SSE-поток и в JSON-ответы | ProviderError + http_error_to_code() → безопасные коды (API_KEY_MISSING … PROVIDER_NETWORK_ERROR), {code, message} без секретов |
+| недоступные/фиктивные model id | openrouter/auto, glm-5.3-fast на open.bigmodel.cn, id моделей не проверялись | live-верификация: `z-ai/glm-5.3-flash` (OpenRouter) и `gpt-5.6-luna` (OpenAI) — GET /models + ping → 200; open.bigmodel.cn и openrouter/auto убраны из routing |
+
 ## 0. Таблица «функция → что уже есть → чего не хватает → фаза»
 
 | Функция | Моника (есть) | Сибериада (переиспользуемое) | Чего не хватает | Фаза |

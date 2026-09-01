@@ -22,6 +22,7 @@ import auth
 import budget
 import config
 import keys as keys_mod
+import model_registry
 import providers
 import terminal as term
 import trash as trash_mod
@@ -141,34 +142,28 @@ def _facts_block(facts):
 # ── генерация digest ──
 
 def _smart_target(uid):
-    """(service, api_model) smart-пары пользователя (синхронно с server.py)."""
-    import onboarding
-    p = auth.load_profile(uid)
-    prefs = (p.get("onboarding", {}).get("prefs") or {})
-    cust = prefs.get("smart") or {}
-    if isinstance(cust, dict) and str(cust.get("api_model") or "").strip():
-        svc = (cust.get("provider")
-               if cust.get("provider") in onboarding.KEY_SERVICES else "smart")
-        return svc, str(cust["api_model"]).strip()
-    return "smart", None
+    """AI1: digest — всегда primary glm-fast (OpenRouter), синхронно с
+    server.resolve_model(uid, "smart")."""
+    return "glm-fast", None
 
 
 def _generate_digest(uid, date, facts):
     """Пишет vault/Digests/<date>.md. Возвращает (rel, processed, tokens).
     P0: digest_llm_enabled (prefs, default false) — пока false, digest
     работает в mock/structured режиме и НЕ тратит реальные токены, даже
-    если mock_llm=false. Реальная модель — только по явному toggle в UI."""
+    если mock_llm=false. Реальная модель — только по явному toggle в UI.
+    AI1: модель — glm-fast (OpenRouter), ключ пользователя → env-fallback."""
     vault = os.path.join(auth.user_dir(uid), "vault")
-    svc, api_mdl = _smart_target(uid)
+    model_key, _api_mdl = _smart_target(uid)
     user_keys = keys_mod.load_keys(config.MACHINE_SECRET, uid)
-    # P0: fallback на серверный ключ из env (клиенту не отдаётся)
-    api_key = providers.resolve_key(user_keys.get(svc), svc) or ""
+    prov = model_registry.get(model_key)["provider"]
+    api_key = providers.resolve_key(user_keys.get(prov), prov) or ""
     prefs = (auth.load_profile(uid).get("onboarding", {}).get("prefs") or {})
     digest_llm = bool(prefs.get("digest_llm_enabled"))
     mock = bool(config.CFG.get("mock_llm")) or not digest_llm
     if not mock and not api_key:
-        raise RuntimeError("нет ключа для сервиса " + svc +
-                           " — добавь в настройках")
+        raise RuntimeError("Для digest не настроен API-ключ "
+                           "(OpenRouter) — добавь в настройках")
     facts_text = _facts_block(facts)
     processed = len(facts)
     tokens = 0
@@ -194,7 +189,7 @@ def _generate_digest(uid, date, facts):
             raise RuntimeError("дневной лимит токенов исчерпан, "
                                "сброс в полночь")
         try:
-            reply, usage = providers.chat(svc, api_key, api_mdl, messages,
+            reply, usage = providers.chat(model_key, api_key, messages,
                                           with_usage=True)
         except Exception:
             budget.release(uid, est)
