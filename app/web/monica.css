@@ -874,3 +874,58 @@ ul.tasklist li.task::before{content:none}
   justify-content:center;font-size:22px;background:rgba(255,255,255,.08);
   border:1px solid var(--border);flex:none}
 .tg-linked .sub{display:block}
+/* ── Фаза D2: Telegram Control Center ── */
+.tg-toggles{padding:4px 16px 8px;display:flex;flex-direction:column;gap:8px}
+.tg-tg{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  background:rgba(255,255,255,.04);border:1px solid var(--border);
+  border-radius:12px;padding:10px 12px;cursor:pointer}
+.tg-tg-txt b{display:block;font-size:13.5px}
+.tg-tg-txt .sub{display:block;font-size:12px;margin-top:2px}
+.tg-sw{width:38px;height:22px;appearance:none;background:rgba(255,255,255,.12);
+  border-radius:11px;position:relative;cursor:pointer;flex:none;
+  transition:background .2s;outline:none}
+.tg-sw::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;
+  border-radius:50%;background:#fff;transition:left .2s}
+.tg-sw:checked{background:var(--accent,#5b8cff)}
+.tg-sw:checked::after{left:19px}
+.tg-sw:disabled{opacity:.5;cursor:wait}
+.tg-soon{margin:6px 16px 10px;background:rgba(255,255,255,.03);
+  border:1px dashed var(--border);border-radius:12px;padding:10px 12px}
+.tg-soon b{font-size:12.5px;opacity:.75}
+.tg-soon-list{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 6px}
+.tg-soon-list .cs-act{opacity:.45;cursor:not-allowed;pointer-events:none}
+.tg-stgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));
+  gap:10px;padding:6px 16px 12px}
+.tg-stcard{background:rgba(255,255,255,.04);border:1px solid var(--border);
+  border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:6px}
+.tg-stcard.off{opacity:.6}
+.tg-stprev{width:72px;height:72px;border-radius:12px;object-fit:contain;
+  background:rgba(255,255,255,.06);border:1px solid var(--border)}
+.tg-stfb{display:flex;align-items:center;justify-content:center;font-size:34px}
+.tg-stname{font-weight:600;font-size:13.5px}
+.tg-stmean{font-size:12.5px;opacity:.85;max-height:52px;overflow:hidden}
+.tg-stcard .row{flex-wrap:wrap;gap:4px;margin-top:auto}
+.tg-stcard .cs-act{font-size:11.5px;padding:4px 8px}
+.tg-stcard .cs-act.danger{color:#e06c75}
+.tg-editor-ov{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;
+  display:flex;align-items:center;justify-content:center}
+.tg-editor{background:var(--panel,#171a21);border:1px solid var(--border);
+  border-radius:16px;padding:16px;width:min(440px,92vw);max-height:88vh;
+  overflow:auto;display:flex;flex-direction:column;gap:8px}
+.tg-f{display:flex;flex-direction:column;gap:4px;font-size:12.5px}
+.tg-f input{background:rgba(255,255,255,.06);border:1px solid var(--border);
+  border-radius:8px;padding:7px 10px;color:inherit;font:inherit}
+.tg-f-chk{flex-direction:row;align-items:center;gap:8px}
+.tg-e-status.ok{color:#6be08a}
+.tg-e-status.err{color:#e06c75}
+.tg-evfilters{display:flex;flex-wrap:wrap;gap:6px;padding:4px 16px 8px}
+.tg-evfilters .cs-act{font-size:12px;padding:4px 10px}
+.tg-evlist{padding:0 16px 12px;display:flex;flex-direction:column;gap:6px;
+  max-height:320px;overflow:auto}
+.tg-evrow{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;
+  background:rgba(255,255,255,.03);border:1px solid var(--border);
+  border-radius:10px;padding:7px 10px;font-size:12.5px}
+.tg-evtime{opacity:.6;font-size:11.5px;flex:none}
+.tg-evtype{font-weight:600}
+.tg-evres.ok{color:#6be08a}
+.tg-evres.warn{color:#d0a04a}

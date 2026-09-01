@@ -2275,16 +2275,27 @@ function renderTgCard(box, st) {
       '<div class="err" style="padding:0 16px 10px">Этот Telegram-аккаунт уже привязан к другому аккаунту Моники.</div>' +
       '<div class="row"><button class="cs-act primary" data-act="start">Подключить Telegram</button></div></div>';
   } else if (st.link) {
+    /* Фаза D2: Control Center — статус, быстрые действия, toggles,
+       «Скоро», память стикеров, история событий */
     h = '<div class="set-card"><div class="set-h">Telegram</div>' +
       '<div class="tg-linked"><div class="tg-ava">✈️</div><div>' +
       '<b>' + esc(st.link.display_name || "Telegram") + "</b>" +
       (st.link.username ? '<span class="sub">@' + esc(st.link.username) + "</span>" : "") +
       '<span class="sub">привязан: ' + esc(st.link.linked_at || "—") +
+      (st.link.last_activity ? " · активность: " + esc(st.link.last_activity) : "") +
       ' · статус бота: активен</span></div></div>' +
       '<div class="row">' +
       (st.bot_username ? '<a class="cs-act" href="https://t.me/' + esc(st.bot_username) +
         '" target="_blank" rel="noopener">Открыть чат с ботом</a>' : "") +
-      '<button class="cs-act" data-act="unlink">Отвязать Telegram</button></div></div>';
+      '<button class="cs-act" data-act="check">Проверить подключение</button>' +
+      '<button class="cs-act" data-act="unlink">Отвязать Telegram</button></div>' +
+      '<p class="sub" style="padding:0 16px">Бот имеет доступ только к включённым функциям. ' +
+      'Базовые команды (/help, /status…) отвечают всегда, токены и содержимое ' +
+      'заметок боту недоступны.</p>' +
+      '<div id="tg-toggles" class="tg-toggles"><p class="sum" style="padding:0 16px">загружаю настройки…</p></div>' +
+      '<div id="tg-soon"></div>' +
+      '<div id="tg-stickers"></div>' +
+      '<div id="tg-events"></div></div>';
   } else if (TG_LOCAL && TG_LOCAL.expires_at > Date.now()) {
     h = '<div class="set-card"><div class="set-h">Telegram</div>' +
       '<p class="sum" style="padding:0 16px">⏳ Ожидаем подтверждение в Telegram…</p>' +
@@ -2315,6 +2326,12 @@ function renderTgCard(box, st) {
   }
   box.innerHTML = h;
   bindTgCard(box, st);
+  if (st.link) {
+    renderTgToggles($("tg-toggles"));
+    renderTgSoon($("tg-soon"));
+    loadTgStickers($("tg-stickers"));
+    loadTgEvents($("tg-events"));
+  }
 }
 
 function bindTgCard(box, st) {
@@ -2344,6 +2361,11 @@ function bindTgCard(box, st) {
       TG_LOCAL = null;
       stopTgPolling();
       renderTgCard(box, st);
+    } else if (act === "check") {
+      const s2 = await tgFetchStatus().catch(() => null);
+      b.textContent = s2 && s2.link ? "Подключение активно ✓" : "Нет подключения";
+      b.disabled = true;
+      setTimeout(() => { b.textContent = "Проверить подключение"; b.disabled = false; }, 2500);
     } else if (act === "unlink") {
       if (!confirm("Отвязать Telegram? Бот перестанет отвечать этому аккаунту; история аудита сохранится.")) return;
       await api("/api/tg/link/unlink", {});
@@ -2383,6 +2405,254 @@ function startTgPolling(box) {
       tgFetchStatus().then(s => renderTgCard(box, s)).catch(() => {});
     }
   }, 1000);
+}
+
+/* ── Фаза D2: toggles возможностей (server-side, немедленное применение) ── */
+const TG_TOGGLES = [
+  ["remember_stickers_enabled", "Запоминать полученные стикеры",
+   "Стикеры из личного чата с ботом сохраняются в библиотеку ниже. Без LLM-описаний."],
+  ["sticker_reply_enabled", "Использовать одобренные стикеры в ответах",
+   "Пока — только ручной просмотр и тестовая отправка из библиотеки."],
+  ["integration_event_logging_enabled", "Сохранять события в журнал интеграции",
+   "Технические события (подключение, стикеры, команды) — только метаданные, без текстов сообщений."]];
+
+function renderTgToggles(box) {
+  if (!box) return;
+  api("/api/tg/settings", {}, "GET").then(r => {
+    const s = (r.data || {}).settings || {};
+    box.innerHTML = TG_TOGGLES.map(t =>
+      '<label class="tg-tg"><span class="tg-tg-txt"><b>' + esc(t[1]) + "</b>" +
+      '<span class="sub">' + esc(t[2]) + "</span></span>" +
+      '<input type="checkbox" class="tg-sw" data-tg-toggle="' + t[0] + '"' +
+      (s[t[0]] ? " checked" : "") + "></label>").join("") +
+      '<p class="sub" style="padding:0 16px">Команды бота (/help, /status…) включены сразу после привязки.</p>';
+    box.querySelectorAll("[data-tg-toggle]").forEach(sw => {
+      sw.onchange = async () => {
+        sw.disabled = true;
+        const body = {};
+        body[sw.dataset.tgToggle] = sw.checked;
+        const rr = await api("/api/tg/settings", body).catch(() => null);
+        sw.disabled = false;
+        if (!rr || !rr.data || !rr.data.ok) sw.checked = !sw.checked;
+        const ev = $("tg-events");
+        if (ev) loadTgEvents(ev);
+      };
+    });
+  }).catch(() => {
+    box.innerHTML = '<p class="err" style="padding:0 16px">не удалось загрузить настройки</p>';
+  });
+}
+
+/* ── Фаза D2: блок «Скоро» — disabled-заглушки БЕЗ endpoints ── */
+function renderTgSoon(box) {
+  if (!box) return;
+  const soon = ["Сохранение сообщений в заметки", "Поиск по базе знаний",
+    "Создание заметок", "Работа с проектом", "Проактивные сообщения",
+    "Кастомные команды", "Группы", "Голосовые сообщения", "Веб-поиск"];
+  box.innerHTML = '<div class="tg-soon"><b>Скоро</b><div class="tg-soon-list">' +
+    soon.map(s => '<button class="cs-act" disabled>' + esc(s) + "</button>").join("") +
+    '</div><p class="sub">Эти функции ещё в разработке и пока недоступны боту.</p></div>';
+}
+
+/* ── Фаза D2: память стикеров (библиотека) ── */
+const TG_STYPE = {static: "стикер", animated: "анимация", video: "видео-стикер"};
+let TG_ST_CACHE = {};
+
+function loadTgStickers(box) {
+  if (!box) return;
+  api("/api/tg/stickers", {}, "GET").then(r => {
+    const d = r.data || {};
+    if (d.archived) {
+      box.innerHTML = '<div class="set-h">Память стикеров</div>' +
+        '<p class="sub" style="padding:0 16px 10px">Библиотека относится к предыдущей привязке ' +
+        "Telegram и сейчас неактивна: повторная привязка другого аккаунта не даёт доступа " +
+        "к старой памяти. Данные сохранены.</p>";
+      return;
+    }
+    const items = d.stickers || [];
+    TG_ST_CACHE = {};
+    items.forEach(s => { TG_ST_CACHE[s.sticker_id] = s; });
+    if (!items.length) {
+      box.innerHTML = '<div class="set-h">Память стикеров</div>' +
+        '<p class="sub" style="padding:0 16px 10px">У бота пока нет запомненных стикеров. ' +
+        "Включите «Запоминать полученные стикеры» и отправьте боту стикер в личном чате.</p>";
+      return;
+    }
+    box.innerHTML = '<div class="set-h">Память стикеров <span class="sub">(' +
+      items.length + "/300)</span></div>" +
+      '<div class="tg-stgrid">' + items.map(tgStickerCard).join("") + "</div>";
+    bindTgStickers(box);
+  }).catch(() => {});
+}
+
+function tgStickerCard(s) {
+  return '<div class="tg-stcard' + (s.enabled ? "" : " off") +
+    '" data-sid="' + esc(s.sticker_id) + '">' +
+    '<img class="tg-stprev" loading="lazy" alt="" src="/api/tg/stickers/' +
+    esc(s.sticker_id) + '/preview">' +
+    '<div class="tg-stprev tg-stfb" style="display:none"><span>' +
+    esc(s.emoji || "🙂") + "</span></div>" +
+    '<div class="tg-stname">' + esc(s.name || "Без названия") + "</div>" +
+    '<div class="sub">' + esc(s.emoji || "") + " · " +
+    esc(TG_STYPE[s.type] || s.type) + ' · <span class="tg-ststate">' +
+    (s.enabled ? "активен" : "выключен") + "</span></div>" +
+    (s.meaning ? '<div class="tg-stmean">' + esc(s.meaning) + "</div>" : "") +
+    '<div class="sub">использований: ' + Number(s.usage_count || 0) + "</div>" +
+    '<div class="row">' +
+    '<button class="cs-act" data-sact="edit">Редактировать</button>' +
+    '<button class="cs-act" data-sact="toggle">' + (s.enabled ? "Выключить" : "Включить") + "</button>" +
+    '<button class="cs-act" data-sact="test"' + (s.enabled ? "" : " disabled") +
+    ">Отправить тестом</button>" +
+    '<button class="cs-act danger" data-sact="del">Удалить</button></div></div>';
+}
+
+function bindTgStickers(box) {
+  /* честный fallback preview: ошибка загрузки → emoji+тип, без фальшивых картинок */
+  box.querySelectorAll("img.tg-stprev").forEach(img => {
+    img.addEventListener("error", () => {
+      img.style.display = "none";
+      const fb = img.nextElementSibling;
+      if (fb) fb.style.display = "flex";
+    });
+  });
+  box.querySelectorAll("[data-sact]").forEach(b => {
+    b.onclick = async () => {
+      const card = b.closest(".tg-stcard");
+      const sid = card.dataset.sid;
+      const act = b.dataset.sact;
+      if (act === "edit") return openTgStickerEditor(sid, box);
+      if (act === "toggle") {
+        /* карточка .off = выключен → включаем; иначе выключаем */
+        const enabling = card.classList.contains("off");
+        const r = await api("/api/tg/stickers/" + sid + "/toggle",
+          {enabled: enabling}).catch(() => null);
+        if (r && r.data.ok) loadTgStickers(box);
+        const ev = $("tg-events");
+        if (ev) loadTgEvents(ev);
+        return;
+      }
+      if (act === "test") {
+        if (!confirm("Отправить этот стикер тебе в Telegram как тест?")) return;
+        b.disabled = true;
+        const r = await api("/api/tg/stickers/" + sid + "/test-send", {})
+          .catch(() => null);
+        b.disabled = false;
+        const ev = $("tg-events");
+        if (ev) loadTgEvents(ev);
+        if (!r) return alert("Ошибка сети");
+        if (r.data.ok) {
+          b.textContent = "Отправлено ✓";
+          setTimeout(() => { b.textContent = "Отправить тестом"; }, 2500);
+        } else alert(r.data.error || "Не удалось отправить");
+        return;
+      }
+      if (act === "del") {
+        if (!confirm("Удалить стикер из памяти Моники? Из Telegram-пака он не исчезнет, " +
+            "но описания и тестовая отправка станут недоступны.")) return;
+        const r = await api("/api/tg/stickers/" + sid, {}, "DELETE").catch(() => null);
+        if (r && r.data.ok) loadTgStickers(box);
+        const ev = $("tg-events");
+        if (ev) loadTgEvents(ev);
+      }
+    };
+  });
+}
+
+/* ── Фаза D2: редактор стикера (модалка, валидация на клиенте и сервере) ── */
+function openTgStickerEditor(sid, listBox) {
+  const s = TG_ST_CACHE[sid];
+  if (!s) return;
+  const old = document.getElementById("tg-editor");
+  if (old) old.remove();
+  const ov = document.createElement("div");
+  ov.id = "tg-editor";
+  ov.className = "tg-editor-ov";
+  ov.innerHTML = '<div class="tg-editor"><div class="set-h">Редактировать стикер</div>' +
+    '<label class="tg-f">Название<input id="tge-name" maxlength="60" value="' + esc(s.name || "") + '"></label>' +
+    '<label class="tg-f">Смысл<input id="tge-meaning" maxlength="300" value="' + esc(s.meaning || "") + '"></label>' +
+    '<label class="tg-f">Тон<input id="tge-tone" maxlength="300" value="' + esc(s.tone || "") + '"></label>' +
+    '<label class="tg-f">Когда использовать<input id="tge-allowed" maxlength="300" value="' + esc(s.allowed_contexts || "") + '"></label>' +
+    '<label class="tg-f">Когда не использовать<input id="tge-blocked" maxlength="300" value="' + esc(s.blocked_contexts || "") + '"></label>' +
+    '<label class="tg-f">Вес (0–1)<input id="tge-weight" type="number" min="0" max="1" step="0.05" value="' +
+    esc(String(s.usage_weight == null ? 0.5 : s.usage_weight)) + '"></label>' +
+    '<label class="tg-f tg-f-chk"><input id="tge-enabled" type="checkbox"' +
+    (s.enabled ? " checked" : "") + "> Включён</label>" +
+    '<div class="tg-e-status sub"></div>' +
+    '<div class="row"><button class="cs-act primary" id="tge-save">Сохранить</button>' +
+    '<button class="cs-act" id="tge-cancel">Отмена</button></div></div>';
+  document.body.appendChild(ov);
+  ov.querySelector("#tge-cancel").onclick = () => ov.remove();
+  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+  ov.querySelector("#tge-save").onclick = async () => {
+    const st = ov.querySelector(".tg-e-status");
+    const wRaw = ov.querySelector("#tge-weight").value.trim();
+    const w = Number(wRaw);
+    if (wRaw === "" || isNaN(w) || w < 0 || w > 1) {
+      st.textContent = "Вес должен быть числом от 0 до 1";
+      st.className = "tg-e-status err";
+      return;
+    }
+    const body = {
+      name: ov.querySelector("#tge-name").value,
+      meaning: ov.querySelector("#tge-meaning").value,
+      tone: ov.querySelector("#tge-tone").value,
+      allowed_contexts: ov.querySelector("#tge-allowed").value,
+      blocked_contexts: ov.querySelector("#tge-blocked").value,
+      usage_weight: w,
+      enabled: ov.querySelector("#tge-enabled").checked};
+    const r = await api("/api/tg/stickers/" + sid, body).catch(() => null);
+    if (r && r.data.ok) {
+      st.textContent = "Сохранено";
+      st.className = "tg-e-status ok";
+      setTimeout(() => {
+        ov.remove();
+        loadTgStickers(listBox || $("tg-stickers"));
+      }, 500);
+    } else {
+      const err = (r && r.data.error) || "Ошибка сохранения";
+      st.textContent = err === "too_long"
+        ? "Слишком длинное значение (максимум 60/300 символов)"
+        : err === "bad_weight" ? "Вес должен быть от 0 до 1" : err;
+      st.className = "tg-e-status err";
+    }
+  };
+}
+
+/* ── Фаза D2: история Telegram-событий (безопасные метаданные) ── */
+const TG_EV_FILTERS = [["all", "Все"], ["stickers", "Стикеры"],
+  ["link", "Подключение"], ["commands", "Команды"], ["errors", "Ошибки"]];
+let TG_EV_FILTER = "all";
+
+function loadTgEvents(box) {
+  if (!box) return;
+  api("/api/tg/events?filter=" + TG_EV_FILTER, {}, "GET").then(r => {
+    const evs = (r.data || {}).events || [];
+    box.innerHTML = '<div class="set-h">История событий</div>' +
+      '<div class="tg-evfilters">' + TG_EV_FILTERS.map(f =>
+        '<button class="cs-act' + (TG_EV_FILTER === f[0] ? " primary" : "") +
+        '" data-evf="' + f[0] + '">' + f[1] + "</button>").join("") + "</div>" +
+      (evs.length ? '<div class="tg-evlist">' + evs.map(tgEventRow).join("") + "</div>"
+        : '<p class="sub" style="padding:0 16px 10px">Событий пока нет. ' +
+          "Включите «Сохранять события в журнал интеграции», чтобы вести историю.</p>");
+    box.querySelectorAll("[data-evf]").forEach(b => {
+      b.onclick = () => {
+        TG_EV_FILTER = b.dataset.evf;
+        loadTgEvents(box);
+      };
+    });
+  }).catch(() => {});
+}
+
+function tgEventRow(e) {
+  const t = e.timestamp ? new Date(e.timestamp * 1000) : null;
+  const meta = Object.entries(e.safe_metadata || {})
+    .map(kv => kv[0] + ": " + kv[1]).join("; ");
+  return '<div class="tg-evrow"><span class="tg-evtime">' +
+    esc(t ? t.toLocaleString() : "—") + "</span>" +
+    '<span class="tg-evtype">' + esc(e.event_label || "") + "</span>" +
+    '<span class="tg-evres ' + (e.result === "ok" ? "ok" : "warn") + '">' +
+    esc(e.result || "") + "</span>" +
+    (meta ? '<span class="sub">' + esc(meta) + "</span>" : "") + "</div>";
 }
 
 function tabTg(p) {

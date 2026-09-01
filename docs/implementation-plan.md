@@ -108,10 +108,33 @@ TTL 600с, attempts ≤5, новый код инвалидирует стары�
 команд (/start /help /status /open /unlink), webhook /api/telegram/webhook/<secret>
 + dev polling по явному флагу, дедуп update_id (последние 1000), TG audit events
 с хешированными id, UI: Настройки→Интеграции→Telegram (полный state machine,
-автоопрос 3с, confirm при отвязке). D2 (проактивные, стикеры) — не начат.
-Состав (остаток): панель прав бота, проактивные сообщения
-(порт `_proactive_loop` + quiet hours + opt-in), библиотека стикеров
-(порт stickers.json/pick_sticker с весами и cooldown).
+автоопрос 3с, confirm при отвязке).
+**D2 выполнен (Telegram Control Center + Sticker Memory):** app/tgstickers.py —
+server-side toggles per link (data/telegram/link_settings.json:
+remember_stickers_enabled / sticker_reply_enabled /
+integration_event_logging_enabled, по умолчанию ВЫКЛ, применяются немедленно
+к входящим update без рестарта, audit telegram_settings_changed); память
+стикеров (data/telegram/stickers.json, per link_key): private-only, только от
+привязанного пользователя, не пересланные, дедуп по telegram_file_unique_id,
+лимиты 300/привязка и 30 новых/час, cooldown ответа о выключенной функции,
+без LLM; журнал интеграции (data/telegram/integration_events.json, последние
+100, целиком управляется toggle event_logging, только техметаданные — без
+текстов/токенов/file_id); test-send — единственная исходящая отправка в D2
+(активная привязка + enabled стикер + rate limit 10/час, безопасная ошибка
+без token/body); link_key в links.json — повторная привязка другого
+TG-аккаунта не даёт автоматического доступа к старой библиотеке (данные
+остаются у пользователя, но неактивны); endpoints /api/tg/settings,
+/api/tg/stickers (+/{id}|toggle|test-send|DELETE, /{id}/preview — серверный
+прокси getFile, file_id не в браузере), /api/tg/events?filter= — всё с
+auth+scope+rate limit; UI: статус+активность, «Проверить подключение»,
+toggles, блок «Скоро» (disabled-заглушки без endpoints), библиотека стикеров
+(карточки, preview/fallback, редактор смысла с валидацией 60/300/вес 0–1,
+вкл/выкл, удалить с confirm, «Отправить тестом» с confirm), история событий
+с фильтрами. Формат каталога адаптирован из Сибериады (stickers.json), без
+LLM-автоописаний и автоподбора. D3 (проактивные, кастомные команды) — не начат.
+Состав (остаток): проактивные сообщения (порт `_proactive_loop` + quiet hours
++ opt-in), автоподбор одобренных стикеров в ответах (sticker_reply_enabled
+уже есть как toggle), кастомные команды (Фаза E).
 Критерии: привязка без ручного chat_id; бот молчит в quiet hours; стикер
 подбирается по настроению; smoke зелёный (TG-логика тестируется юнит-функциями).
 Зависимости: A (audit, budget для TG-запросов тоже).

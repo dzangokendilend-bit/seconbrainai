@@ -18,7 +18,10 @@ _SAFE_KEYS = {"service", "ok", "status", "path", "limit", "kind",
               # Фаза C: digest/trash
               "enabled", "date", "processed", "tokens", "trigger",
               # Фаза D1: Telegram (id — только хеши, коды ошибок — safe)
-              "event", "result", "tg_user_hash", "error_code", "ip_hash"}
+              "event", "result", "tg_user_hash", "error_code", "ip_hash",
+              # Фаза D2: Telegram Control Center (toggle — имя переключателя,
+              # kind — род события; file_id/токены/тексты сюда не попадают)
+              "toggle", "type"}
 
 _MAX_LINE = 4000  # jsonl-строки <4KB — достаточно для простого append
 

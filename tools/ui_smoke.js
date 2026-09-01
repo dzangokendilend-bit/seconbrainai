@@ -1013,6 +1013,382 @@ const consoleErrors = [], badResponses = [];
     !JSON.stringify(stD1b.data).includes(TG_TOKEN_STR) &&
     !auditAll.includes(TG_TOKEN_STR));
 
+  /* ── Фаза D2: Telegram Control Center + Sticker Memory (без реального Telegram API) ── */
+  /* юнит-скрипт: toggles/память стикеров/дедуп/лимиты/валидация/изоляция/test-send/события */
+  const unitD2 = path.join(tmpDir, "test_tg_d2.py");
+  fs.writeFileSync(unitD2, [
+    "import os, sys, json, time, shutil",
+    "sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'app'))",
+    "import tgbot, tgstickers, audit, auth, config",
+    "n = 0",
+    "sent = []",
+    "def send(chat_id, text): sent.append((chat_id, text))",
+    "def last(): return sent[-1][1] if sent else ''",
+    "uid = sys.argv[1]",
+    "TG = 900100",
+    "tgbot.unlink(uid)",
+    "# защитная очистка после возможного прошлого падения (идемпотентность)",
+    "_s = tgstickers.get_settings(uid)",
+    "_olk = _s.get('link_id')",
+    "tgstickers.set_settings(uid, {'remember_stickers_enabled': False,",
+    "    'sticker_reply_enabled': False, 'integration_event_logging_enabled': False})",
+    "_d = tgstickers._load(tgstickers.STICKERS_PATH, {})",
+    "_d.pop(_olk, None)",
+    "tgstickers._save(tgstickers.STICKERS_PATH, _d)",
+    "_e = tgstickers._load(tgstickers.EVENTS_PATH, {})",
+    "_e.pop(uid, None)",
+    "tgstickers._save(tgstickers.EVENTS_PATH, _e)",
+    "ubase = 800000 + (int(time.time()) % 1000000) * 1000  # уникальные update_id между прогонами",
+    "# 1: toggles по умолчанию выключены",
+    "s = tgstickers.get_settings(uid)",
+    "assert (not s['remember_stickers_enabled'] and not s['sticker_reply_enabled']",
+    "        and not s['integration_event_logging_enabled']); n += 1",
+    "# привязка (напрямую set_link: create_link_token имеет общий rate limit 5/час с D1-проверками)",
+    "tgbot.set_link(uid, TG, TG, 'd2tester', 'D2 Tester')",
+    "assert tgbot.get_uid_by_tg(TG) == uid; n += 1",
+    "def upd(i, tg, ctype, extra=None, text=None):",
+    "    m = {'message_id': i, 'date': 1, 'chat': {'id': tg, 'type': ctype},",
+    "         'from': {'id': tg, 'is_bot': False, 'first_name': 'T'}}",
+    "    if text: m['text'] = text",
+    "    if extra: m.update(extra)",
+    "    return {'update_id': i, 'message': m}",
+    "def st_extra(fu, fid=None, animated=False, video=False):",
+    "    return {'sticker': {'file_id': fid or ('FID_' + fu), 'file_unique_id': fu,",
+    "            'is_animated': animated, 'is_video': video, 'emoji': '🐱',",
+    "            'set_name': 'Pack', 'width': 512, 'height': 512, 'file_size': 100}}",
+    "lk = tgstickers.link_key_for_uid(uid)",
+    "assert lk; n += 1",
+    "base = ubase + 100",
+    "# 2: toggle выключен → не сохраняется, ответ про выключенную функцию с cooldown",
+    "tgbot.handle_update(upd(base+1, TG, 'private', extra=st_extra('FU1')), send)",
+    "assert 'выключена' in last(); n += 1",
+    "cnt = len(sent)",
+    "tgbot.handle_update(upd(base+2, TG, 'private', extra=st_extra('FU2')), send)",
+    "assert len(sent) == cnt; n += 1  # cooldown: повторного ответа нет",
+    "assert not (tgstickers._load(tgstickers.STICKERS_PATH, {}).get(lk) or []); n += 1",
+    "# 3: включили toggle → стикер сохраняется с корректными полями",
+    "tgstickers.apply_settings_change(uid, {'remember_stickers_enabled': True,",
+    "    'integration_event_logging_enabled': True})",
+    "tgbot.handle_update(upd(base+3, TG, 'private', extra=st_extra('FU3', animated=True)), send)",
+    "assert 'Запомнила стикер' in last(); n += 1",
+    "items = tgstickers._load(tgstickers.STICKERS_PATH, {}).get(lk) or []",
+    "assert (len(items) == 1 and items[0]['telegram_file_unique_id'] == 'FU3'",
+    "        and items[0]['type'] == 'animated'",
+    "        and items[0]['enabled'] is True); n += 1",
+    "sid = items[0]['sticker_id']",
+    "# file_id/file_unique_id не попадают в браузерное представление",
+    "pub = json.dumps(tgstickers.sticker_public(items[0]), ensure_ascii=False)",
+    "assert 'FID_FU3' not in pub and 'FU3' not in pub; n += 1",
+    "# 4: дедуп по file_unique_id — обновление updated_at, без дубля",
+    "old_upd = items[0]['updated_at']",
+    "time.sleep(0.02)",
+    "tgbot.handle_update(upd(base+4, TG, 'private', extra=st_extra('FU3', fid='OTHER')), send)",
+    "items = tgstickers._load(tgstickers.STICKERS_PATH, {}).get(lk) or []",
+    "assert len(items) == 1 and items[0]['updated_at'] > old_upd; n += 1",
+    "# 5: непривязанный → отказ и ничего не сохраняется",
+    "tgbot.handle_update(upd(base+5, 900200, 'private', extra=st_extra('FU4')), send)",
+    "assert 'Сначала подключи' in last(); n += 1",
+    "assert len(tgstickers._load(tgstickers.STICKERS_PATH, {}).get(lk) or []) == 1; n += 1",
+    "# 6: группа → короткий отказ",
+    "tgbot.handle_update(upd(base+6, -100300, 'group', extra=st_extra('FU5')), send)",
+    "assert last() == tgbot.MSG_GROUP; n += 1",
+    "# 7: пересланный стикер → не сохраняется",
+    "fwd = upd(base+7, TG, 'private', extra=st_extra('FU6'))",
+    "fwd['message']['forward_origin'] = {'type': 'user', 'sender_user': {'id': 555}}",
+    "tgbot.handle_update(fwd, send)",
+    "assert len(tgstickers._load(tgstickers.STICKERS_PATH, {}).get(lk) or []) == 1; n += 1",
+    "# 8: лимит 300 на привязку (FU3 сохраняем — он нужен дальше)",
+    "data = tgstickers._load(tgstickers.STICKERS_PATH, {})",
+    "fu3 = [x for x in (data.get(lk) or [])",
+    "       if x.get('telegram_file_unique_id') == 'FU3']",
+    "assert len(fu3) == 1; n += 1",
+    "data[lk] = fu3 + [{'sticker_id': '%032x' % i,",
+    "                   'telegram_file_unique_id': 'BULK%d' % i,",
+    "                   'created_at': time.time() - 7200} for i in range(300)]",
+    "tgstickers._save(tgstickers.STICKERS_PATH, data)",
+    "tgbot.handle_update(upd(base+8, TG, 'private', extra=st_extra('FU7')), send)",
+    "assert 'заполнена' in last(); n += 1",
+    "data = tgstickers._load(tgstickers.STICKERS_PATH, {})",
+    "data[lk] = fu3",
+    "tgstickers._save(tgstickers.STICKERS_PATH, data)",
+    "# 9: лимит 30 новых/час",
+    "data = tgstickers._load(tgstickers.STICKERS_PATH, {})",
+    "now = time.time()",
+    "data[lk] = [dict(fu3[0], created_at=now)] + [",
+    "    {'sticker_id': '%032x' % i, 'telegram_file_unique_id': 'H%d' % i, 'created_at': now}",
+    "    for i in range(30)]",
+    "tgstickers._save(tgstickers.STICKERS_PATH, data)",
+    "tgbot.handle_update(upd(base+9, TG, 'private', extra=st_extra('FU8')), send)",
+    "assert 'Слишком много' in last(); n += 1",
+    "data = tgstickers._load(tgstickers.STICKERS_PATH, {})",
+    "data[lk] = fu3",
+    "tgstickers._save(tgstickers.STICKERS_PATH, data)",
+    "# 10: валидация редактора (вес вне 0-1, длины)",
+    "rec, err = tgstickers.update_sticker(uid, lk, sid, {'usage_weight': 1.5})",
+    "assert rec is None and err == 'bad_weight'; n += 1",
+    "rec, err = tgstickers.update_sticker(uid, lk, sid, {'name': 'x' * 61})",
+    "assert rec is None and err == 'too_long'; n += 1",
+    "rec, err = tgstickers.update_sticker(uid, lk, sid,",
+    "                                    {'name': 'Грустный кот', 'meaning': 'тоска',",
+    "                                     'usage_weight': 0.7})",
+    "assert err is None and rec['name'] == 'Грустный кот' and rec['usage_weight'] == 0.7; n += 1",
+    "# 11: изоляция пользователей — чужой стикер читать/менять/удалять/слать нельзя",
+    "other = auth.create_user('tg_d2_tmp', 'tmpsecret2', None, {})",
+    "ouid = other['user_id']",
+    "otok, _ = tgbot.create_link_token(ouid, ip='10.1.0.2')",
+    "tgbot.handle_update(upd(base+10, 900300, 'private', text='/start ' + otok), send)",
+    "olk = tgstickers.link_key_for_uid(ouid)",
+    "assert olk and olk != lk; n += 1",
+    "rec, err = tgstickers.update_sticker(ouid, olk, sid, {'name': 'hack'})",
+    "assert rec is None and err == 'not_found'; n += 1",
+    "assert tgstickers.delete_sticker(ouid, olk, sid) is False; n += 1",
+    "okr, err = tgstickers.test_send(ouid, sid)",
+    "assert not okr and err in ('not_found', 'not_linked'); n += 1",
+    "# 12: выключенный стикер нельзя отправить тестом",
+    "tgstickers.toggle_sticker(uid, lk, sid, False)",
+    "okr, err = tgstickers.test_send(uid, sid)",
+    "assert not okr and err == 'disabled'; n += 1",
+    "tgstickers.toggle_sticker(uid, lk, sid, True)",
+    "# 13: test-send через mock-транспорт + rate limit 10/час",
+    "calls = []",
+    "tgstickers._tg_send_sticker = lambda chat_id, fid, st: calls.append((chat_id, fid, st))",
+    "okr, err = tgstickers.test_send(uid, sid)",
+    "assert okr and calls and calls[-1][1] == 'FID_FU3'; n += 1",
+    "res = [tgstickers.test_send(uid, sid)[1] for _ in range(20)]",
+    "assert res.count('ok') == 9 and res.count('rate_limited') == 11; n += 1",
+    "# 14: ошибка Telegram API → безопасный код, без token/file_id в ответе и audit",
+    "def boom(chat_id, fid, st): raise RuntimeError('https://api.telegram.org/botSECRET123:fail')",
+    "tgstickers._tg_send_sticker = boom",
+    "audit._HITS.pop('tgtst:' + uid, None)",
+    "okr, err = tgstickers.test_send(uid, sid)",
+    "assert not okr and err == 'api_error'; n += 1",
+    "ap = os.path.join(auth.user_dir(uid), 'audit.jsonl')",
+    "atext = open(ap, encoding='utf-8').read() if os.path.exists(ap) else ''",
+    "assert 'SECRET123' not in atext and 'FID_FU3' not in atext; n += 1",
+    "# 15: события истории — фильтры работают, без file_id/текстов",
+    "evs = tgstickers.get_events(uid)",
+    "assert evs and 'FID_FU3' not in json.dumps(evs) and 'FU3' not in json.dumps(evs); n += 1",
+    "ev_st = tgstickers.get_events(uid, 'stickers')",
+    "assert ev_st and all('sticker' in e['event_type'] or 'test' in e['event_type']",
+    "                     for e in ev_st); n += 1",
+    "ev_err = tgstickers.get_events(uid, 'errors')",
+    "assert ev_err and all(e['event_type'] in ('rate_limited', 'api_error', 'test_failed')",
+    "                      for e in ev_err); n += 1",
+    "evtext = json.dumps(tgstickers._load(tgstickers.EVENTS_PATH, {}), ensure_ascii=False)",
+    "assert 'FID_FU3' not in evtext and 'SECRET' not in evtext; n += 1",
+    "# 16: D1-команды не сломаны",
+    "tgbot.handle_update(upd(base+20, TG, 'private', text='/help'), send)",
+    "assert '/status' in last() and '/open' in last(); n += 1",
+    "# 17: бот не читает vault — в хранилищах D2 нет путей vault",
+    "alltext = ''",
+    "for p in (tgstickers.STICKERS_PATH, tgstickers.SETTINGS_PATH, tgstickers.EVENTS_PATH):",
+    "    if os.path.exists(p): alltext += open(p, encoding='utf-8').read()",
+    "assert 'vault' not in alltext.lower(); n += 1",
+    "# cleanup",
+    "tgbot.unlink(uid)",
+    "tgbot.unlink(ouid)",
+    "idx = auth._load_index()",
+    "idx.pop('tg_d2_tmp', None)",
+    "auth._save_index(idx)",
+    "shutil.rmtree(auth.user_dir(ouid), ignore_errors=True)",
+    "tgstickers.set_settings(uid, {'remember_stickers_enabled': False,",
+    "    'sticker_reply_enabled': False, 'integration_event_logging_enabled': False})",
+    "data = tgstickers._load(tgstickers.STICKERS_PATH, {})",
+    "data.pop(lk, None)",
+    "tgstickers._save(tgstickers.STICKERS_PATH, data)",
+    "ev = tgstickers._load(tgstickers.EVENTS_PATH, {})",
+    "ev.pop(uid, None)",
+    "tgstickers._save(tgstickers.EVENTS_PATH, ev)",
+    "print('OK', n)"].join("\n"));
+  let d2Out = "";
+  try {
+    d2Out = execSync('python "' + unitD2 + '" ' + uidD1, {encoding: "utf8"});
+  } catch (e) {
+    d2Out = String((e && e.stdout) || "") + " " + String((e && e.message) || e);
+  }
+  ok("D2: юнит-скрипт control-center (toggles default off/cooldown/сохранение по toggle/дедуп/unlinked/group/forwarded/лимиты 300 и 30ч/валидация/изоляция/disabled test-send/rate limit 10ч/api error без секретов/события+фильтры/D1-команды/без vault) — " +
+    d2Out.trim().split("\n").pop(), /^OK \d+/m.test(d2Out));
+  try { fs.unlinkSync(unitD2); } catch (e) {}
+
+  /* API-проверки D2 (вне страницы, чтобы 4xx не попадали в badResponses) */
+  const unauthD2 = await fetch(BASE + "/api/tg/settings");
+  ok("D2: /api/tg/settings без сессии → 401", unauthD2.status === 401);
+  const setD2a = await apiRaw("/api/tg/settings");
+  ok("D2: GET /api/tg/settings → ok, все toggles выключены",
+    setD2a.status === 200 && setD2a.data.ok &&
+    setD2a.data.settings.remember_stickers_enabled === false &&
+    setD2a.data.settings.sticker_reply_enabled === false &&
+    setD2a.data.settings.integration_event_logging_enabled === false);
+  const setD2b = await apiRaw("/api/tg/settings",
+    {method: "POST", body: JSON.stringify({remember_stickers_enabled: true})});
+  const setD2c = await apiRaw("/api/tg/settings");
+  ok("D2: POST toggle → сохраняется на сервере (переживает перечитывание)",
+    setD2b.status === 200 && setD2b.data.ok &&
+    setD2c.data.settings.remember_stickers_enabled === true);
+  await apiRaw("/api/tg/settings",
+    {method: "POST", body: JSON.stringify({remember_stickers_enabled: false})});
+  const evBad = await apiRaw("/api/tg/events?filter=bogus");
+  ok("D2: /api/tg/events с неизвестным фильтром → 400", evBad.status === 400);
+  const evOk = await apiRaw("/api/tg/events?filter=stickers");
+  ok("D2: /api/tg/events?filter=stickers → ok", evOk.status === 200 && evOk.data.ok);
+  const stNoLink = await apiRaw("/api/tg/stickers");
+  ok("D2: GET /api/tg/stickers без активной привязки → 400 (scope)",
+    stNoLink.status === 400);
+  const stNoLink2 = await apiRaw("/api/tg/stickers/badid/test-send",
+    {method: "POST", body: "{}"});
+  ok("D2: test-send без привязки/с плохим id → 400",
+    stNoLink2.status === 400 || stNoLink2.status === 404);
+
+  /* ── D2: браузерный сценарий (15 шагов, mock-стикер через setup-скрипт) ── */
+  const setupD2 = path.join(tmpDir, "test_tg_d2_setup.py");
+  fs.writeFileSync(setupD2, [
+    "import os, sys",
+    "sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'app'))",
+    "import tgbot, tgstickers",
+    "uid = sys.argv[1]",
+    "TG = 900400",
+    "tgbot.unlink(uid)",
+    "tgbot.set_link(uid, TG, TG, 'd2tester', 'D2 Tester')",
+    "tgstickers.apply_settings_change(uid, {'remember_stickers_enabled': True,",
+    "    'integration_event_logging_enabled': True})",
+    "act, rec = tgstickers.remember_sticker(uid, tgstickers.link_key_for_uid(uid),",
+    "    {'file_id': 'FID_BROWSER_1', 'file_unique_id': 'FUB1', 'type': 'static',",
+    "     'emoji': '🐱', 'set_name': 'BrowserPack', 'width': 512, 'height': 512,",
+    "     'file_size': 100})",
+    "print('OK', rec['sticker_id'] if rec else '-')"].join("\n"));
+  let setupOut = "";
+  try {
+    setupOut = execSync('python "' + setupD2 + '" ' + uidD1, {encoding: "utf8"});
+  } catch (e) {
+    setupOut = String((e && e.stdout) || "") + " " + String((e && e.message) || e);
+  }
+  const d2Sid = (setupOut.match(/OK ([0-9a-f]+)/) || [])[1] || "";
+  ok("D2: setup — привязка + включённые toggles + mock-стикер сохранён", !!d2Sid);
+  try { fs.unlinkSync(setupD2); } catch (e) {}
+  const stListD2 = await apiRaw("/api/tg/stickers");
+  ok("D2: GET /api/tg/stickers → ok, file_id/file_unique_id не в ответе",
+    stListD2.status === 200 && stListD2.data.ok &&
+    !JSON.stringify(stListD2.data).includes("telegram_file_id") &&
+    !JSON.stringify(stListD2.data).includes("telegram_file_unique_id"));
+
+  /* preview-запросы перехватываем (без реального Telegram API): успешный
+     прокси моделируем 200 с 1x1 PNG; fallback проверяем синтетической
+     ошибкой загрузки — честный 404 сервера покрыт юнит-логикой */
+  const PNG1x1_D2 = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+    "base64");
+  await page.setRequestInterception(true);
+  page.on("request", req => {
+    if (req.url().includes("/api/tg/stickers/") && req.url().endsWith("/preview"))
+      req.respond({status: 200, contentType: "image/png", body: PNG1x1_D2});
+    else req.continue();
+  });
+  /* диалоги confirm: удаление — принять, тестовая отправка — отменить
+     (успешная отправка покрыта юнит-скриптом с mock-транспортом) */
+  let dialogMode = "dismiss";
+  let dialogSeen = 0;
+  page.on("dialog", async d => {
+    dialogSeen++;
+    if (dialogMode === "accept") await d.accept();
+    else await d.dismiss();
+  });
+
+  await page.click('.cs-navitem[data-tab="set"]');
+  await new Promise(r => setTimeout(r, 600));
+  await page.click('.set-tab[data-t="integrations"]');
+  await new Promise(r => setTimeout(r, 1200));
+  ok("D2 UI: toggles возможностей отрисованы (3 переключателя)",
+    (await page.$$("#tg-toggles .tg-sw")).length === 3);
+  ok("D2 UI: «Запоминать стикеры» включён (server-side состояние)",
+    await page.$eval("#tg-toggles [data-tg-toggle=remember_stickers_enabled]",
+      el => el.checked).catch(() => false));
+  const soonBtns = await page.$$eval("#tg-soon .tg-soon-list button",
+    els => els.map(b => b.disabled));
+  ok("D2 UI: блок «Скоро» — все заглушки disabled, без рабочих endpoints",
+    soonBtns.length >= 8 && soonBtns.every(d => d));
+  ok("D2 UI: стикер из mock-обновления виден в библиотеке",
+    await page.$("#tg-stickers .tg-stcard"));
+  ok("D2 UI: preview загружен через серверный прокси (img на месте)",
+    await page.$eval("#tg-stickers img.tg-stprev",
+      el => el.complete && el.naturalWidth > 0).catch(() => false));
+  await page.evaluate(() =>
+    document.querySelector("#tg-stickers img.tg-stprev")
+      .dispatchEvent(new Event("error")));
+  await new Promise(r => setTimeout(r, 200));
+  ok("D2 UI: ошибка preview → честный fallback (emoji), без фальшивой картинки",
+    await page.$eval("#tg-stickers .tg-stcard .tg-stfb",
+      el => getComputedStyle(el).display !== "none").catch(() => false));
+  /* редактор: имя/смысл/тон/условия/вес → сохранить */
+  await page.click('#tg-stickers [data-sact="edit"]');
+  await page.waitForSelector("#tg-editor", {timeout: 3000}).catch(() => {});
+  await page.$eval("#tge-name", el => { el.value = ""; });
+  await page.type("#tge-name", "Котик-тест");
+  await page.$eval("#tge-meaning", el => { el.value = ""; });
+  await page.type("#tge-meaning", "уют и поддержка");
+  await page.$eval("#tge-tone", el => { el.value = ""; });
+  await page.type("#tge-tone", "тёплый");
+  await page.$eval("#tge-allowed", el => { el.value = ""; });
+  await page.type("#tge-allowed", "после хороших новостей");
+  await page.$eval("#tge-blocked", el => { el.value = ""; });
+  await page.type("#tge-blocked", "в серьёзных обсуждениях");
+  await page.$eval("#tge-weight", el => { el.value = "0.8"; });
+  /* валидация: вес вне 0-1 отклоняется на клиенте, без серверного 4xx */
+  await page.$eval("#tge-weight", el => { el.value = "1.5"; });
+  await page.click("#tge-save");
+  await new Promise(r => setTimeout(r, 300));
+  ok("D2 UI: вес 1.5 отклонён с понятной ошибкой (без сервера)",
+    await page.$eval("#tg-editor .tg-e-status",
+      el => el.className.includes("err")).catch(() => false));
+  await page.$eval("#tge-weight", el => { el.value = "0.8"; });
+  await page.click("#tge-save");
+  await new Promise(r => setTimeout(r, 250));
+  ok("D2 UI: редактор сохранил метаданные (status saved)",
+    await page.$eval("#tg-editor .tg-e-status",
+      el => el.className.includes("ok")).catch(() => false));
+  await new Promise(r => setTimeout(r, 800));  // оверлей закрывается сам
+  /* перезагрузка страницы → сохранилось */
+  await page.reload({waitUntil: "networkidle0", timeout: 15000});
+  await page.click('.cs-navitem[data-tab="set"]');
+  await new Promise(r => setTimeout(r, 600));
+  await page.click('.set-tab[data-t="integrations"]');
+  await new Promise(r => setTimeout(r, 1200));
+  ok("D2 UI: после перезагрузки имя/смысл сохранились",
+    await page.$eval("#tg-stickers .tg-stname",
+      el => el.textContent === "Котик-тест").catch(() => false));
+  /* выключить стикер → тестовая отправка заблокирована (кнопка disabled) */
+  await page.click('#tg-stickers [data-sact="toggle"]');
+  await new Promise(r => setTimeout(r, 800));
+  ok("D2 UI: стикер выключен → «Отправить тестом» заблокирована",
+    await page.$eval('#tg-stickers [data-sact="test"]',
+      el => el.disabled).catch(() => false));
+  await page.click('#tg-stickers [data-sact="toggle"]');
+  await new Promise(r => setTimeout(r, 800));
+  /* «Отправить тестом» с confirm (confirm отменяем — успешная отправка
+     покрыта юнит-скриптом; реальный Telegram API в тестах не используется) */
+  await page.click('#tg-stickers [data-sact="test"]');
+  await new Promise(r => setTimeout(r, 400));
+  ok("D2 UI: «Отправить тестом» требует confirm", dialogSeen === 1);
+  /* удаление через confirm → карточка исчезла + безопасное событие в истории */
+  dialogMode = "accept";
+  await page.click('#tg-stickers [data-sact="del"]');
+  await new Promise(r => setTimeout(r, 1000));
+  ok("D2 UI: удаление через confirm → карточка исчезла",
+    !(await page.$("#tg-stickers .tg-stcard")));
+  ok("D2 UI: в истории появилось безопасное событие удаления",
+    await page.evaluate(() =>
+      document.body.textContent.includes("Стикер удалён")));
+  ok("D2 UI: рядом нет работающих toggles vault/групп/проактивных (все «Скоро» disabled)",
+    (await page.$$eval("#tg-soon .tg-soon-list button",
+      els => els.every(b => b.disabled))) && (await page.$("#tg-soon")));
+  await page.screenshot({path: path.join(__dirname, "ui_d2.png")});
+  /* cleanup D2: отвязка + toggles off (данные остаются, доступ прекращён) */
+  await apiRaw("/api/tg/link/unlink", {method: "POST", body: "{}"});
+  await apiRaw("/api/tg/settings", {method: "POST", body: JSON.stringify({
+    remember_stickers_enabled: false, sticker_reply_enabled: false,
+    integration_event_logging_enabled: false})});
+  /* перехват остаётся включённым до конца прогона: не-preview запросы
+     просто продолжаются (req.continue), отключение ломает обработчик */
+
   /* UI: настройки digest в «Модулях» */
   await page.click('.cs-navitem[data-tab="set"]');
   await new Promise(r => setTimeout(r, 600));

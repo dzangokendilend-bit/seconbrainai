@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import urllib.parse
+import urllib.request
 import zipfile
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,6 +31,7 @@ import providers
 import terminal as term
 import modules as mon_mods
 import tgbot
+import tgstickers
 
 COOKIE = "monica_session"
 # Фаза 5-B: карта модель -> сервис генерируется из единого реестра onboarding.MODELS
@@ -96,12 +98,15 @@ class Handler(BaseHTTPRequestHandler):
     # ── служебное ──
 
     def _tg_link_status(self):
-        """Фаза D1: статус привязки Telegram (GET из UI и POST-вариант)."""
+        """Фаза D1: статус привязки Telegram (GET из UI и POST-вариант).
+        Фаза D2: + последняя активность (last_seen_at, обновляется
+        tgbot.touch_last_seen не чаще раза в минуту)."""
         uid = self._uid()
         if not uid:
             self._json({"error": "нужен вход"}, 401)
             return
         link = tgbot.get_link_by_uid(uid)
+        last_seen = link.get("last_seen_at") if link else None
         self._json({"ok": True,
                     "configured": bool(config.TG_TOKEN),
                     "bot_username": config.TG_BOT_USERNAME,
@@ -109,9 +114,98 @@ class Handler(BaseHTTPRequestHandler):
                         "display_name": link.get("display_name"),
                         "username": link.get("username"),
                         "linked_at": link.get("linked_at"),
+                        "last_activity": time.strftime(
+                            "%Y-%m-%d %H:%M", time.localtime(last_seen))
+                            if last_seen else None,
                     } if link else None,
                     "pending": tgbot.active_token_meta(uid),
                     "notice": tgbot.pop_notice(uid)})
+
+    # ── Фаза D2: Telegram Control Center (settings/stickers/events) ──
+
+    def _tg_scope(self):
+        """(uid, link_key) активной привязки или (None, None) + ответ об
+        ошибке. Строгий scope: все операции D2 — только со своей привязкой."""
+        uid = self._uid()
+        if not uid:
+            self._json({"error": "нужен вход"}, 401)
+            return None, None
+        link = tgbot.get_link_by_uid(uid)
+        lk = (link or {}).get("link_key")
+        if not link or not lk or link.get("status") != "active":
+            self._json({"error": "Telegram не привязан"}, 400)
+            return None, None
+        return uid, lk
+
+    def _tg_settings(self):
+        uid = self._uid()
+        if not uid:
+            self._json({"error": "нужен вход"}, 401)
+            return
+        s = tgstickers.get_settings(uid)
+        self._json({"ok": True, "linked": tgbot.get_link_by_uid(uid) is not None,
+                    "settings": {k: bool(s.get(k)) for k in tgstickers.TOGGLES}})
+
+    def _tg_stickers_list(self):
+        uid, lk = self._tg_scope()
+        if not uid:
+            return
+        # «архив»: библиотека от предыдущей привязки (другой TG-аккаунт) —
+        # данные пользователя сохранены, но автоматического доступа нет
+        rec = tgstickers._load(tgstickers.STICKERS_PATH, {}).get(uid) or {}
+        archived = bool(rec) and rec.get("link_id") != lk
+        self._json({"ok": True, "archived": archived,
+                    "stickers": tgstickers.list_stickers(uid, lk)})
+
+    def _tg_events(self):
+        uid = self._uid()
+        if not uid:
+            self._json({"error": "нужен вход"}, 401)
+            return
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        filt = (q.get("filter") or ["all"])[0]
+        if filt != "all" and filt not in tgstickers.EVENT_FILTERS:
+            self._json({"error": "неизвестный фильтр"}, 400)
+            return
+        self._json({"ok": True, "filter": filt,
+                    "events": tgstickers.get_events(
+                        uid, None if filt == "all" else filt)})
+
+    def _tg_sticker_preview(self, sid):
+        """Серверный прокси preview: getFile + скачивание файла — file_id
+        и токен НЕ попадают в браузер. Любая ошибка → честный 404 (UI
+        показывает fallback с emoji/типом)."""
+        uid, lk = self._tg_scope()
+        if not uid:
+            return
+        rec = tgstickers.get_sticker(uid, lk, sid, with_file_id=True)
+        fid = (rec or {}).get("telegram_file_id")
+        if not fid or not config.TG_TOKEN:
+            self._json({"error": "preview недоступен"}, 404)
+            return
+        try:
+            info = tgbot._api(config.TG_TOKEN, "getFile",
+                              {"file_id": fid}, timeout=8)
+            fp = ((info or {}).get("result") or {}).get("file_path") or ""
+            if not info.get("ok") or not fp or "/" in fp or ".." in fp:
+                raise IOError("bad getFile result")
+            url = ("https://api.telegram.org/file/bot"
+                   + config.TG_TOKEN + "/" + fp)
+            with urllib.request.urlopen(url, timeout=10) as r:
+                raw = r.read(2_000_000)
+            ext = os.path.splitext(fp)[1].lower().lstrip(".")
+            ctype = {"webp": "image/webp", "png": "image/png",
+                     "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                     "webm": "video/webm"}.get(ext, "application/octet-stream")
+        except Exception:
+            self._json({"error": "preview недоступен"}, 404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Cache-Control", "private, max-age=300")
+        self.end_headers()
+        self.wfile.write(raw)
 
     def _json(self, obj, status=200, set_cookie=None, clear_cookie=False):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
@@ -378,6 +472,25 @@ class Handler(BaseHTTPRequestHandler):
             # (GET из UI; тот же ответ доступен и через POST)
             self._tg_link_status()
             return
+        if path == "/api/tg/settings":
+            # Фаза D2: настройки привязки (toggles) — чтение
+            self._tg_settings()
+            return
+        if path == "/api/tg/stickers":
+            # Фаза D2: библиотека стикеров (без file_id в ответе)
+            self._tg_stickers_list()
+            return
+        if path == "/api/tg/events":
+            # Фаза D2: история интеграционных событий (?filter=)
+            self._tg_events()
+            return
+        if (path.startswith("/api/tg/stickers/")
+                and path.endswith("/preview")):
+            # Фаза D2: серверный прокси preview (file_id не в браузер)
+            sid = path[len("/api/tg/stickers/"):-len("/preview")]
+            if re.fullmatch(r"[0-9a-f]{8,32}", sid):
+                self._tg_sticker_preview(sid)
+                return
         if path == "/api/wiki/read":
             # реворк вики: реальный файл по полному относительному пути
             # (GET ?path=…; тот же маршрут доступен и через POST)
@@ -1215,7 +1328,113 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True})
             return
 
+        # ── Фаза D2: Telegram Control Center (mutations, auth + scope +
+        # rate limit на CRUD-операции) ──
+        if path == "/api/tg/settings":
+            if not audit.rate_limit("tgset:" + uid, 30, 60.0):
+                self._json({"error": "слишком много запросов"}, 429)
+                return
+            changes = {k: body.get(k) for k in tgstickers.TOGGLES
+                       if k in body}
+            if not changes:
+                self._json({"error": "нет изменений"}, 400)
+                return
+            rec = tgstickers.apply_settings_change(uid, changes)
+            self._json({"ok": True,
+                        "settings": {k: bool(rec.get(k))
+                                     for k in tgstickers.TOGGLES}})
+            return
+        if path.startswith("/api/tg/stickers/"):
+            uid2, lk = self._tg_scope()
+            if not uid2:
+                return
+            if not audit.rate_limit("tgapi:" + uid2, 60, 60.0):
+                self._json({"error": "слишком много запросов"}, 429)
+                return
+            rest = path[len("/api/tg/stickers/"):]
+            sid, _, action = rest.partition("/")
+            if not re.fullmatch(r"[0-9a-f]{8,32}", sid):
+                self._json({"error": "неверный id стикера"}, 400)
+                return
+            if action == "":
+                # обновление метаданных (название/смысл/тон/контексты/вес)
+                rec, err = tgstickers.update_sticker(uid2, lk, sid, body)
+                if err == "not_found":
+                    self._json({"error": "стикер не найден"}, 404)
+                    return
+                if err:
+                    self._json({"ok": False, "error": err}, 400)
+                    return
+                self._json({"ok": True,
+                            "sticker": tgstickers.sticker_public(rec)})
+                return
+            if action == "toggle":
+                enabled = body.get("enabled")
+                cur = tgstickers.get_sticker(uid2, lk, sid)
+                if not cur:
+                    self._json({"error": "стикер не найден"}, 404)
+                    return
+                if enabled is None:
+                    enabled = not cur.get("enabled")
+                rec, err = tgstickers.toggle_sticker(uid2, lk, sid,
+                                                     bool(enabled))
+                if err:
+                    self._json({"ok": False, "error": err}, 400)
+                    return
+                self._json({"ok": True,
+                            "sticker": tgstickers.sticker_public(rec)})
+                return
+            if action == "test-send":
+                ok, err = tgstickers.test_send(uid2, sid)
+                if err == "not_found":
+                    self._json({"error": "стикер не найден"}, 404)
+                    return
+                if err == "disabled":
+                    self._json({"ok": False, "error": "стикер выключен"}, 409)
+                    return
+                if err == "rate_limited":
+                    self._json({"error": "слишком много отправок, "
+                                         "подожди час"}, 429)
+                    return
+                if err == "not_linked":
+                    self._json({"error": "Telegram не привязан"}, 400)
+                    return
+                if not ok:
+                    # ошибка Telegram API — безопасное сообщение без
+                    # token/response body
+                    self._json({"ok": False,
+                                "error": "Не удалось отправить: ошибка "
+                                         "Telegram. Попробуй позже."}, 502)
+                    return
+                self._json({"ok": True})
+                return
+            self._json({"error": "неизвестный маршрут"}, 404)
+            return
+
         self._json({"error": "неизвестный маршрут"}, 404)
+
+
+    def do_DELETE(self):
+        # Фаза D2: удаление стикера из памяти Моники (confirm на клиенте,
+        # scope-проверка на сервере; file_id в audit не пишется)
+        path = urllib.parse.urlparse(self.path).path
+        if not path.startswith("/api/tg/stickers/"):
+            self.send_error(404)
+            return
+        uid, lk = self._tg_scope()
+        if not uid:
+            return
+        if not audit.rate_limit("tgapi:" + uid, 60, 60.0):
+            self._json({"error": "слишком много запросов"}, 429)
+            return
+        sid = path[len("/api/tg/stickers/"):]
+        if not re.fullmatch(r"[0-9a-f]{8,32}", sid):
+            self._json({"error": "неверный id стикера"}, 400)
+            return
+        if not tgstickers.delete_sticker(uid, lk, sid):
+            self._json({"error": "стикер не найден"}, 404)
+            return
+        self._json({"ok": True})
 
 
     # ── PUT ──

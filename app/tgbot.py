@@ -233,10 +233,21 @@ def get_uid_by_tg(tg_user_id):
 def set_link(uid, tg_user_id, chat_id, username, display_name):
     with LOCK:
         links = _load(LINKS_PATH, {})
+        old = links.get(uid) or {}
+        if (old.get("telegram_user_id") == str(tg_user_id)
+                and old.get("link_key")):
+            # повторная привязка того же TG-аккаунта — ключ привязки
+            # сохраняется (библиотека стикеров остаётся доступной)
+            link_key = old["link_key"]
+        else:
+            # новая привязка (в т.ч. ДРУГОГО TG-аккаунта) — новый ключ:
+            # автоматического доступа к старой библиотеке нет (D2)
+            link_key = secrets.token_hex(8)
         links[uid] = {"telegram_user_id": str(tg_user_id),
                       "telegram_chat_id": chat_id,
                       "username": username or "",
                       "display_name": display_name or "",
+                      "link_key": link_key,
                       "linked_at": time.strftime("%Y-%m-%d %H:%M"),
                       "last_seen_at": time.time(),
                       "status": "active"}
@@ -247,7 +258,10 @@ def unlink(uid):
     """Отвязка: привязка удаляется, все linking tokens инвалидируются,
     бот перестаёт отвечать этому Telegram user ID. История аудита НЕ
     удаляется; личные данные не удаляются молча — доступ просто прекращается.
-    Повторная привязка возможна (в т.ч. другого TG-аккаунта)."""
+    Повторная привязка возможна (в т.ч. другого TG-аккаунта). Настройки
+    и библиотека стикеров D2 ОСТАЮТСЯ данными пользователя, но неактивны
+    (доступ к библиотеке привязан к link_key конкретной привязки)."""
+    had_link = get_link_by_uid(uid) is not None
     with LOCK:
         links = _load(LINKS_PATH, {})
         if uid in links:
@@ -255,6 +269,27 @@ def unlink(uid):
             _save(LINKS_PATH, links)
     revoke_active_tokens(uid)
     _tg_audit(uid, "telegram_unlinked", result="ok")
+    if had_link:
+        try:
+            import tgstickers
+            tgstickers.log_event(uid, "unlinked", "ok")
+        except Exception:
+            pass
+
+
+def touch_last_seen(tg_user_id, min_interval=60.0):
+    """Обновление «последней активности» для карточки Telegram (не чаще
+    раза в минуту, чтобы не перезаписывать links.json на каждый update)."""
+    now = time.time()
+    with LOCK:
+        links = _load(LINKS_PATH, {})
+        for l in links.values():
+            if (str(l.get("telegram_user_id")) == str(tg_user_id)
+                    and l.get("status") == "active"):
+                if now - (l.get("last_seen_at") or 0) >= min_interval:
+                    l["last_seen_at"] = now
+                    _save(LINKS_PATH, links)
+                return
 
 
 # ── дедуп update_id (data/telegram/seen_updates.json, последние ~1000) ──
@@ -305,7 +340,10 @@ def _handle(update, send):
     chat = msg.get("chat") or {}
     frm = msg.get("from") or {}
     text = str(msg.get("text") or "").strip()[:MSG_MAX]
-    if not text:
+    # Фаза D2: стикеры обрабатываются наравне с текстом (private-only,
+    # привязанный пользователь, не пересланные — проверки в tgstickers)
+    has_sticker = isinstance(msg.get("sticker"), dict)
+    if not text and not has_sticker:
         return {"ok": True}
     if chat.get("type") != "private":
         # в группе — один короткий отказ, никаких команд и привязок
@@ -315,11 +353,22 @@ def _handle(update, send):
     chat_id = chat.get("id")
     if not tg_uid or chat_id is None:
         return {"ok": True}
+    touch_last_seen(tg_uid)
     if not audit.rate_limit("tgcmd:%s:%s" % (tg_uid, chat_id), CMD_RATE, 60.0):
         _tg_audit(get_uid_by_tg(tg_uid), "telegram_command_rate_limited",
                   result="limited", tg_user_hash=tg_hash(tg_uid))
         send(chat_id, MSG_RATE)
         return {"ok": True, "rate_limited": True}
+    # Фаза D2: память стикеров — до командной ветки (у стикера нет текста)
+    if has_sticker:
+        try:
+            import tgstickers
+            if tgstickers.handle_incoming_sticker_message(msg, send):
+                return {"ok": True, "sticker": True}
+        except Exception:
+            _tg_audit(get_uid_by_tg(tg_uid), "telegram_sticker_rejected",
+                      result="error", error_code="handler")
+        return {"ok": True}
     cmd, _, arg = text.partition(" ")
     cmd = cmd.split("@", 1)[0].lower()  # /cmd@botname → /cmd
     arg = arg.strip()[:80]
@@ -382,6 +431,11 @@ def _cmd_start(tg_uid, chat_id, frm, arg, send):
         set_notice(uid, None)
         _tg_audit(uid, "telegram_linked", result="ok",
                   tg_user_hash=tg_hash(tg_uid))
+        try:
+            import tgstickers
+            tgstickers.log_event(uid, "linked", "ok")
+        except Exception:
+            pass
         send(chat_id, MSG_CONNECTED)
         return {"ok": True, "linked": True}
     # /start без кода — привязка или приветствие
